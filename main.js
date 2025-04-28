@@ -15,6 +15,7 @@ canvas.width = 600;
 canvas.height = 600;
 document.body.appendChild(canvas);
 Object.assign(document.body.style, {
+  overflow: 'hidden',
   width: '100vw',
   height: '100vh',
   margin: '0',
