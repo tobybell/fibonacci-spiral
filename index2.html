@@ -20,6 +20,7 @@ Object.assign(document.body.style, {
 });
 
 const gl = canvas.getContext('webgl2');
+gl.enable(gl.DEPTH_TEST);
 
 const create_shader = (gl, type, source) => {
   const shader = gl.createShader(type);
@@ -69,6 +70,8 @@ const env = {
     programs.push(program);
     return id;
   },
+  cos: Math.cos,
+  sin: Math.sin,
   console_log(ptr, len) {
     const data = decoder.decode(new Uint8Array(memory, ptr, len));
     console.log(data);
@@ -121,6 +124,11 @@ WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
   };
   ctx.draw = draw;
   draw();
+
+  canvas.addEventListener('wheel', e => {
+    exports.scroll(0, 0, e.deltaX, e.deltaY);
+    e.preventDefault();
+  }, false);
 });
 </script>
 </html>
