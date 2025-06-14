@@ -14,16 +14,21 @@ u32 bindUniformBlock(u32 program, u32 block, u32 binding);
 u32 makeBuffer(u32 size);
 void bindUniformBuffer(u32 binding, u32 buffer);
 void fillBuffer(u32 buffer, u32 ofs, void const* src, u32 size);
+void make_texture(void const* data, u32 size);
 f32 cos(f32);
 f32 sin(f32);
 
+void set_viewport(i32 x, i32 y, u32 dx, u32 dy);
 void useProgram(u32 program);
 void drawPoints(u32 base, u32 count);
+void drawTriangleStrip(u32 base, u32 count);
+void drawTriangleStripInstanced(u32 base, u32 count, u32 instanceCount);
 
 void start();
 void draw();
 void scroll(f32 x, f32 y, f32 dx, f32 dy);
 void key(u32 id);
+void resize(u32 width, u32 height);
 
 }
 
@@ -120,10 +125,14 @@ namespace {
 u32 make_vertex_shader(Str s) { return ::make_vertex_shader(s.base, s.size); }
 u32 make_fragment_shader(Str s) { return ::make_fragment_shader(s.base, s.size); }
 u32 make_program(Ref<u32 const> shaders) { return ::make_program(shaders.base, shaders.size); }
+u32 getUniformBlock(u32 program, Str s) { return ::getUniformBlock(program, s.base, s.size); }
 
 u32 program;
 u32 pointProgram;
+u32 textProgram;
+
 u32 uModelBuffer;
+u32 uResolutionBuffer;
 
 struct GlMat3 {
   f32 elem[9];
@@ -182,15 +191,78 @@ GlMat3 rot_y(GlMat3 R0, f32 th) {
 
 }
 
+u32 make_text_program() {
+  u32 s0 = make_vertex_shader(R"gl(#version 300 es
+uniform Resolution {
+  vec2 uResolution;
+};
+out mediump vec2 vCoord;
+void main() {
+  vec2 glyphSize = vec2(5.0, 7.0);
+  float glyphStride = 6.0;
+  vec2 charSize = glyphSize * 2.0 / uResolution;
+  vCoord = vec2(float(gl_VertexID / 2), float(gl_VertexID % 2));
+  vec2 coord = (-1.0 + 20.0 / uResolution) + vCoord * charSize;
+  float shift = glyphStride * 2.0 / uResolution.x;
+  gl_Position = vec4(shift * float(gl_InstanceID) + coord.x, coord.y, 0, 1);
+}
+  )gl"_s);
+  u32 s1 = make_fragment_shader(R"gl(#version 300 es
+uniform lowp usampler2D u_image;
+in mediump vec2 vCoord;
+out mediump vec4 oColor;
+void main() {
+  uint character = 65u;
+  uvec2 ij = uvec2(vCoord * vec2(5, 7));
+  uint bit = ij.x + ij.y * 5u + character * 35u;
+  uint pixel = bit / 8u;
+  uint texel = texelFetch(u_image, ivec2(pixel, 0), 0).r;
+  uint ans = (texel >> (bit % 8u)) & 1u;
+  oColor = vec4(ans, ans, ans, 1);
+}
+  )gl"_s);
+  return make_program((u32[]) {s0, s1});
+}
+
+// Bits: [128 glyphs][7 rows][5 columns] = 4480 bits
+extern u64 const font_data[70];
+
+struct App {
+  List<char> string;
+
+  void key(Key key) {
+    if (key == Backspace) {
+      if (string)
+        string.pop();
+    } else {
+      u32 letter = u32(key - KeyA);
+      if (letter < 26)
+        string.push('A' + letter);
+    }
+  }
+
+  void draw() {
+    useProgram(textProgram);
+    drawTriangleStripInstanced(0, 4, len(string));
+  }
+};
+
+static App* app;
+
 void start() {
   init_heap();
-  println("Hello!");
+  app = new App;
 
+  println("Hello!");
+  make_texture(font_data, sizeof(font_data));
+
+  textProgram = make_text_program();
   u32 s0 = make_vertex_shader(R"gl(#version 300 es
 #define pi 3.1415926535897932
 #define N 32
 uniform Settings {
   mat3 u_model;
+  mat4 u_view;
 };
 void main() {
   int xi = gl_VertexID / N;
@@ -211,7 +283,7 @@ void main() {
 
   vec3 pos = u_model * normalize(pt);
   gl_PointSize = 4.0;
-  gl_Position = vec4(pos * vec3(2., 2., 1.), 4. + pos.z);
+  gl_Position = u_view * vec4(pos, 1);
 }
   )gl"_s);
 
@@ -232,11 +304,12 @@ uniform Settings {
 };
 uniform Settings2 {
   mat3 u_model;
+  mat4 u_view;
 };
 void main() {
   gl_PointSize = 4.0;
   vec3 pos = u_model * u_pos;
-  gl_Position = vec4(pos * vec3(2., 2., 1.), 4. + pos.z);
+  gl_Position = u_view * vec4(pos, 1);
 }
 )gl");
 u32 s3 = make_fragment_shader(R"gl(#version 300 es
@@ -249,23 +322,28 @@ void main() {
 
   println("Made"_s);
 
-  uModelBuffer = makeBuffer(48);
+  uModelBuffer = makeBuffer(112);
   u32 uPosBuffer = makeBuffer(16);
+  uResolutionBuffer = makeBuffer(16);
 
   bindUniformBuffer(0, uModelBuffer);
   bindUniformBuffer(1, uPosBuffer);
+  bindUniformBuffer(2, uResolutionBuffer);
 
   R = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 
   f32 pos[] {1, 0, 0};
   fillBuffer(uPosBuffer, 0, pos, sizeof(pos));
 
-  u32 programSettings = getUniformBlock(program, "Settings", 8);
-  u32 pointProgramSettings = getUniformBlock(pointProgram, "Settings", 8);
-  u32 pointProgramSettings2 = getUniformBlock(pointProgram, "Settings2", 9);
+  u32 programSettings = getUniformBlock(program, "Settings");
+  u32 pointProgramSettings = getUniformBlock(pointProgram, "Settings");
+  u32 pointProgramSettings2 = getUniformBlock(pointProgram, "Settings2");
   bindUniformBlock(program, programSettings, 0);
   bindUniformBlock(pointProgram, pointProgramSettings2, 0);
   bindUniformBlock(pointProgram, pointProgramSettings, 1);
+
+  u32 textResolution = getUniformBlock(textProgram, "Resolution");
+  bindUniformBlock(textProgram, textResolution, 2);
 }
 
 void scroll(f32 x, f32 y, f32 dx, f32 dy) {
@@ -273,14 +351,34 @@ void scroll(f32 x, f32 y, f32 dx, f32 dy) {
 }
 
 void key(u32 id) {
-  auto key = key_map.map[id];
-  println("Got key "_s, key);
+  app->key(key_map.map[id]);
 }
+
+f32 aspect = 1;
+
+void resize(u32 width, u32 height) {
+  aspect = f32(width) / f32(height);
+  fillBuffer(uResolutionBuffer, 0, (f32[]) {f32(width), f32(height)}, 8);
+  set_viewport(0, 0, width, height);
+}
+
+struct ModelUnifom {
+  f32 u_model[3][4];  // column-major
+  f32 u_view[4][4];  // column-major
+};
 
 void draw() {
   R = rot_y(R);
-  f32 eye[] {R[0], R[1], R[2], 0, R[3], R[4], R[5], 0, R[6], R[7], R[8], 0};
-  fillBuffer(uModelBuffer, 0, eye, sizeof(eye));
+
+  ModelUnifom u;
+  new (u.u_model) decltype(u.u_model) {R[0], R[1], R[2], 0, R[3], R[4], R[5], 0, R[6], R[7], R[8], 0};
+  new (u.u_view) decltype(u.u_view) {
+    2 / aspect, 0, 0, 0,
+    0, 2, 0, 0,
+    0, 0, 1, 1,
+    0, 0, 0, 4};
+
+  fillBuffer(uModelBuffer, 0, &u, sizeof(u));
 
   useProgram(program);
   u32 N = 32;
@@ -288,6 +386,8 @@ void draw() {
 
   useProgram(pointProgram);
   drawPoints(0, 1);
+
+  app->draw();
 
   redraw();
 }

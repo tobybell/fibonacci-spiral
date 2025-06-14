@@ -3,8 +3,7 @@
 <body>
 <script>
 const canvas = document.createElement('canvas');
-canvas.width = 600;
-canvas.height = 600;
+canvas.style.imageRendering = 'pixelated';
 document.body.appendChild(canvas);
 Object.assign(document.body.style, {
   overflow: 'hidden',
@@ -19,7 +18,7 @@ Object.assign(document.body.style, {
   alignItems: 'center',
 });
 
-const gl = canvas.getContext('webgl2');
+const gl = canvas.getContext('webgl2', { antialias: false });
 gl.enable(gl.DEPTH_TEST);
 
 const create_shader = (gl, type, source) => {
@@ -57,6 +56,9 @@ const env = {
     shaders.push(create_shader(gl, gl.FRAGMENT_SHADER, data));
     return id;
   },
+  set_viewport(x, y, dx, dy) {
+    gl.viewport(x, y, dx, dy);
+  },
   make_program(ptr, len) {
     const shader_ids = new Uint32Array(memory, ptr, len);
     const program = gl.createProgram();
@@ -82,6 +84,12 @@ const env = {
   },
   drawPoints(base, count) {
     gl.drawArrays(gl.POINTS, base, count);
+  },
+  drawTriangleStrip(base, count) {
+    gl.drawArrays(gl.TRIANGLE_STRIP, base, count);
+  },
+  drawTriangleStripInstanced(base, count, instanceCount) {
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, base, count, instanceCount);
   },
   redraw() {
     if (!ctx.needsDraw) {
@@ -112,12 +120,32 @@ const env = {
   bindUniformBlock(program, block, binding) {
     gl.uniformBlockBinding(programs[program], block, binding);
   },
+  make_texture(src, size) {
+    const data = new Uint8Array(memory, src, size);
+    data[0] = 255;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,                // mip level
+        gl.R8UI,          // internal format
+        560,                // width
+        1,                // height
+        0,                // border
+        gl.RED_INTEGER,   // source format
+        gl.UNSIGNED_BYTE, // source type
+        data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  }
 };
 
 WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
   memory = mod.instance.exports.memory.buffer;
   const exports = mod.instance.exports;
   exports.start();
+
+
   const draw = () => {
     gl.clear(gl.COLOR_BUFFER_BIT);
     ctx.needsDraw = false;
@@ -135,6 +163,15 @@ WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
     if (exports.key(e.keyCode))
       e.preventDefault();
   }, false);
+
+  const resize = () => {
+    console.log('resize', window.innerWidth, window.innerHeight);
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    exports.resize(window.innerWidth, window.innerHeight);
+  };
+  window.addEventListener('resize', resize);
+  resize();
 });
 </script>
 </html>

@@ -255,3 +255,5 @@ void free(void* ptr) {
     return;
   return cur_heap().free(ptr);
 }
+
+[[nodiscard]] void* operator new(uptr size) { return malloc(size); }

@@ -1,4 +1,4 @@
-MODS=main malloc print
+MODS=main malloc print font-data
 OBJECTS=$(MODS:%=build/%.o)
 
 main.wasm: $(OBJECTS)
