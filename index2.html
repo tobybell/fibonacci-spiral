@@ -44,6 +44,7 @@ const programs = [];
 const buffers = [];
 const decoder = new TextDecoder();
 const env = {
+  abort() { throw 0; },
   make_vertex_shader(source, len) {
     const id = shaders.length;
     const data = decoder.decode(new Uint8Array(memory, source, len));

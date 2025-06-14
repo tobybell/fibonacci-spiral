@@ -6,7 +6,6 @@ extern "C" {
 u32 make_vertex_shader(char const* source, u32 len);
 u32 make_fragment_shader(char const* source, u32 len);
 u32 make_program(u32 const* shaders, u32 n_shaders);
-void console_log(char const* str, u32 len);
 void redraw();
 u32 getUniformBlock(u32 program, char const* name, u32 len);
 u32 bindUniformBlock(u32 program, u32 block, u32 binding);
@@ -25,27 +24,14 @@ void scroll(f32 x, f32 y, f32 dx, f32 dy);
 
 }
 
+void init_heap();
+
+#include "print.hh"
+
 namespace {
-
-template <class T>
-struct Ref {
-  T* base;
-  u32 size;
-  constexpr Ref() = default;
-  constexpr Ref(T* b, u32 s): base(b), size(s) {}
-  template <u32 N>
-  constexpr Ref(T (&x)[N]): base(x), size(N) {}
-};
-
-using Str = Ref<char const>;
-
-constexpr Str operator""_s(char const* s, unsigned long n) {
-  return {s, n};
-}
 
 u32 make_vertex_shader(Str s) { return ::make_vertex_shader(s.base, s.size); }
 u32 make_fragment_shader(Str s) { return ::make_fragment_shader(s.base, s.size); }
-void console_log(Str s) { ::console_log(s.base, s.size); }
 u32 make_program(Ref<u32 const> shaders) { return ::make_program(shaders.base, shaders.size); }
 
 u32 program;
@@ -110,7 +96,8 @@ GlMat3 rot_y(GlMat3 R0, f32 th) {
 }
 
 void start() {
-  console_log("Hello!", 6);
+  init_heap();
+  println("Hello!");
 
   u32 s0 = make_vertex_shader(R"gl(#version 300 es
 #define pi 3.1415926535897932
@@ -173,7 +160,7 @@ void main() {
 )gl");
   pointProgram = make_program((u32[]) {s2, s3});
 
-  console_log("Made", 4);
+  println("Made"_s);
 
   uModelBuffer = makeBuffer(48);
   u32 uPosBuffer = makeBuffer(16);
