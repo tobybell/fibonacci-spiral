@@ -130,6 +130,11 @@ WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
     exports.scroll(0, 0, e.deltaX, e.deltaY);
     e.preventDefault();
   }, false);
+
+  document.addEventListener('keydown', e => {
+    if (exports.key(e.keyCode))
+      e.preventDefault();
+  }, false);
 });
 </script>
 </html>
