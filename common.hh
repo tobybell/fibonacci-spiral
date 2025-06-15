@@ -335,6 +335,8 @@ struct Ref {
   template <u32 N>
   constexpr Ref(T (&x)[N]): base(x), size(N) {}
   friend u32 len(Ref const& x) { return x.size; }
+  T* begin() const { return base; }
+  T const* end() const { return base + size; }
 };
 
 template <class T>

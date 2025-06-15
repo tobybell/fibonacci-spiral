@@ -17,7 +17,11 @@ void fillBuffer(u32 buffer, u32 ofs, void const* src, u32 size);
 void make_texture(void const* data, u32 size);
 f32 cos(f32);
 f32 sin(f32);
+void test(u32);
 void vertexAttributeArrayU8(
+  u32 attrib, u32 buffer, u32 components, bool normalized, u8 stride,
+  u32 offset, u32 instanceDivisor);
+void vertexAttributeArrayI16(
   u32 attrib, u32 buffer, u32 components, bool normalized, u8 stride,
   u32 offset, u32 instanceDivisor);
 
@@ -130,6 +134,7 @@ u32 getUniformBlock(u32 program, Str s) { return ::getUniformBlock(program, s.ba
 u32 program;
 u32 pointProgram;
 u32 textProgram;
+u32 multiLineTextProgram;
 
 u32 uModelBuffer;
 u32 uResolutionBuffer;
@@ -192,6 +197,25 @@ GlMat3 rot_y(GlMat3 R0, f32 th) {
 }
 
 u32 make_text_program() {
+  u32 v_multiline = make_vertex_shader(R"gl(#version 300 es
+uniform Resolution {
+  vec2 uResolution;
+};
+layout (location = 0) in lowp uint aGlyph;
+layout (location = 1) in mediump ivec2 aColRow;
+flat out lowp uint vGlyph;
+out mediump vec2 vCoord;
+void main() {
+  vGlyph = aGlyph;
+  vec2 glyphSize = vec2(5.0, 7.0);
+  float glyphStride = 6.0;
+  vec2 charSize = glyphSize * 2.0 / uResolution;
+  vCoord = vec2(float(gl_VertexID / 2), float(gl_VertexID % 2));
+  vec2 coord = (-1.0 + 20.0 / uResolution) + vCoord * charSize;
+  vec2 shift = vec2(aColRow * ivec2(6, 8) * 2) / uResolution;
+  gl_Position = vec4(shift + coord, 0, 1);
+}
+  )gl"_s);
   u32 s0 = make_vertex_shader(R"gl(#version 300 es
 uniform Resolution {
   vec2 uResolution;
@@ -225,6 +249,9 @@ void main() {
   oColor = vec4(ans, ans, ans, 1);
 }
   )gl"_s);
+
+  multiLineTextProgram = make_program((u32[]) {v_multiline, s1}); 
+
   return make_program((u32[]) {s0, s1});
 }
 
@@ -234,10 +261,15 @@ extern u64 const font_data[70];
 struct App {
   List<char> string;
   u32 stringBuffer = makeBuffer(64);
+  u32 colRowBuffer = makeBuffer(256);
 
   App() {
     useProgram(textProgram);
     vertexAttributeArrayU8(0, stringBuffer, 1, 0, 0, 0, 1);
+
+    useProgram(multiLineTextProgram);
+    vertexAttributeArrayU8(0, stringBuffer, 1, 0, 0, 0, 1);
+    vertexAttributeArrayI16(1, colRowBuffer, 2, 0, 0, 0, 1);
   }
 
   void key(Key key) {
@@ -246,6 +278,8 @@ struct App {
         string.pop();
     } else if (key == Space) {
       string.push(' ');
+    } else if (key == Enter) {
+      string.push('\n');
     } else {
       u32 letter = u32(key - KeyA);
       if (letter < 26)
@@ -254,8 +288,26 @@ struct App {
   }
 
   void draw() {
-    useProgram(textProgram);
+    // lay out string
+    i16 row = 0;
+    i16 col = 0;
+    Array<i16[2]> colRow(len(string));
+    for (u32 i: range(len(string))) {
+      colRow[i][0] = col++;
+      colRow[i][1] = row;
+      if (string[i] == '\n') {
+        --row;
+        col = 0;
+      }
+    }
+
+    // TODO: Handle this in shader rather than here
+    for (u32 i: range(len(string)))
+      colRow[i][1] -= row;
+
+    useProgram(multiLineTextProgram);
     fillBuffer(stringBuffer, 0, string.begin(), len(string));
+    fillBuffer(colRowBuffer, 0, colRow.begin(), len(colRow) * 4);
     drawTriangleStripInstanced(0, 4, len(string));
   }
 };
@@ -357,6 +409,8 @@ void main() {
 
   u32 textResolution = getUniformBlock(textProgram, "Resolution");
   bindUniformBlock(textProgram, textResolution, 2);
+  u32 mltr = getUniformBlock(multiLineTextProgram, "Resolution");
+  bindUniformBlock(multiLineTextProgram, mltr, 2);
 }
 
 void scroll(f32 x, f32 y, f32 dx, f32 dy) {

@@ -65,6 +65,12 @@ const env = {
     gl.vertexAttribIPointer(attrib, components, gl.UNSIGNED_BYTE, normalized, stride, offset);
     gl.vertexAttribDivisor(attrib, instanceDivisor);
   },
+  vertexAttributeArrayI16(attrib, buffer, components, normalized, stride, offset, instanceDivisor) {
+    gl.enableVertexAttribArray(attrib);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers[buffer]);
+    gl.vertexAttribIPointer(attrib, components, gl.SHORT, normalized, stride, offset);
+    gl.vertexAttribDivisor(attrib, instanceDivisor);
+  },
   make_program(ptr, len) {
     const shader_ids = new Uint32Array(memory, ptr, len);
     const program = gl.createProgram();

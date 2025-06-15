@@ -41,6 +41,14 @@ void print_array(
     char const* base, u32 size, u32 count, void (*)(char const*, Print&),
     Print&);
 
+template <class T, u32 N>
+inline void print(T (&arr)[N], Print& s_) {
+  using TC = T const;
+  print_array(
+      reinterpret_cast<char const*>(arr), sizeof(T), N,
+      [](char const* x, Print& s) { print(*(TC*) x, s); }, s_);
+}
+
 template <class T>
 inline void print(Span<T> arr, Print& s_) {
   using TC = T const;
