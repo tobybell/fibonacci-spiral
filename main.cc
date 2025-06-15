@@ -17,6 +17,9 @@ void fillBuffer(u32 buffer, u32 ofs, void const* src, u32 size);
 void make_texture(void const* data, u32 size);
 f32 cos(f32);
 f32 sin(f32);
+void vertexAttributeArrayU8(
+  u32 attrib, u32 buffer, u32 components, bool normalized, u8 stride,
+  u32 offset, u32 instanceDivisor);
 
 void set_viewport(i32 x, i32 y, u32 dx, u32 dy);
 void useProgram(u32 program);
@@ -83,13 +86,10 @@ struct KeyMap {
     map[220] = Backslash;
     map[221] = RightBracket;
     map[192] = GraveAccent;
-    map[32] = World1;
-    map[32] = World2;
     map[27] = Escape;
     map[13] = Enter;
     map[9] = Tab;
     map[8] = Backspace;
-    map[32] = Insert;
     map[46] = Delete;
     map[39] = Right;
     map[37] = Left;
@@ -196,8 +196,11 @@ u32 make_text_program() {
 uniform Resolution {
   vec2 uResolution;
 };
+layout (location = 0) in lowp uint aGlyph;
+flat out lowp uint vGlyph;
 out mediump vec2 vCoord;
 void main() {
+  vGlyph = aGlyph;
   vec2 glyphSize = vec2(5.0, 7.0);
   float glyphStride = 6.0;
   vec2 charSize = glyphSize * 2.0 / uResolution;
@@ -209,10 +212,11 @@ void main() {
   )gl"_s);
   u32 s1 = make_fragment_shader(R"gl(#version 300 es
 uniform lowp usampler2D u_image;
+flat in lowp uint vGlyph;
 in mediump vec2 vCoord;
 out mediump vec4 oColor;
 void main() {
-  uint character = 65u;
+  uint character = vGlyph;
   uvec2 ij = uvec2(vCoord * vec2(5, 7));
   uint bit = ij.x + ij.y * 5u + character * 35u;
   uint pixel = bit / 8u;
@@ -229,11 +233,19 @@ extern u64 const font_data[70];
 
 struct App {
   List<char> string;
+  u32 stringBuffer = makeBuffer(64);
+
+  App() {
+    useProgram(textProgram);
+    vertexAttributeArrayU8(0, stringBuffer, 1, 0, 0, 0, 1);
+  }
 
   void key(Key key) {
     if (key == Backspace) {
       if (string)
         string.pop();
+    } else if (key == Space) {
+      string.push(' ');
     } else {
       u32 letter = u32(key - KeyA);
       if (letter < 26)
@@ -243,6 +255,7 @@ struct App {
 
   void draw() {
     useProgram(textProgram);
+    fillBuffer(stringBuffer, 0, string.begin(), len(string));
     drawTriangleStripInstanced(0, 4, len(string));
   }
 };
@@ -251,12 +264,12 @@ static App* app;
 
 void start() {
   init_heap();
-  app = new App;
 
   println("Hello!");
   make_texture(font_data, sizeof(font_data));
 
   textProgram = make_text_program();
+  app = new App;
   u32 s0 = make_vertex_shader(R"gl(#version 300 es
 #define pi 3.1415926535897932
 #define N 32

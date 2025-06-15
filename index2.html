@@ -18,7 +18,7 @@ Object.assign(document.body.style, {
   alignItems: 'center',
 });
 
-const gl = canvas.getContext('webgl2', { antialias: false });
+const gl = canvas.getContext('webgl2');
 gl.enable(gl.DEPTH_TEST);
 
 const create_shader = (gl, type, source) => {
@@ -58,6 +58,12 @@ const env = {
   },
   set_viewport(x, y, dx, dy) {
     gl.viewport(x, y, dx, dy);
+  },
+  vertexAttributeArrayU8(attrib, buffer, components, normalized, stride, offset, instanceDivisor) {
+    gl.enableVertexAttribArray(attrib);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers[buffer]);
+    gl.vertexAttribIPointer(attrib, components, gl.UNSIGNED_BYTE, normalized, stride, offset);
+    gl.vertexAttribDivisor(attrib, instanceDivisor);
   },
   make_program(ptr, len) {
     const shader_ids = new Uint32Array(memory, ptr, len);
