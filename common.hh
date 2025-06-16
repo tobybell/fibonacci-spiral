@@ -336,7 +336,8 @@ struct Ref {
   constexpr Ref(T (&x)[N]): base(x), size(N) {}
   friend u32 len(Ref const& x) { return x.size; }
   T* begin() const { return base; }
-  T const* end() const { return base + size; }
+  T* end() const { return base + size; }
+  T& operator[](u32 i) const { check(i < size); return base[i]; }
 };
 
 template <class T>

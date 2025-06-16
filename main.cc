@@ -8,6 +8,11 @@ extern "C" {
 u32 make_vertex_shader(char const* source, u32 len);
 u32 make_fragment_shader(char const* source, u32 len);
 u32 make_program(u32 const* shaders, u32 n_shaders);
+
+u32 makeVertexArray();
+void bindVertexArray(u32 vertexArray);
+void dropVertexArray(u32 vertexArray);
+
 void redraw();
 u32 getUniformBlock(u32 program, char const* name, u32 len);
 u32 bindUniformBlock(u32 program, u32 block, u32 binding);
@@ -30,6 +35,7 @@ void useProgram(u32 program);
 void drawPoints(u32 base, u32 count);
 void drawTriangleStrip(u32 base, u32 count);
 void drawTriangleStripInstanced(u32 base, u32 count, u32 instanceCount);
+void demo();
 
 void start();
 void draw();
@@ -135,6 +141,7 @@ u32 program;
 u32 pointProgram;
 u32 textProgram;
 u32 multiLineTextProgram;
+u32 circleProgram;
 
 u32 uModelBuffer;
 u32 uResolutionBuffer;
@@ -258,36 +265,35 @@ void main() {
 // Bits: [128 glyphs][7 rows][5 columns] = 4480 bits
 extern u64 const font_data[70];
 
-struct App {
-  List<char> string;
+struct VertexArray {
+  VertexArray(): id(makeVertexArray()) {}
+  VertexArray(VertexArray const&) = delete;
+  VertexArray(VertexArray&& y): id(exchange(y.id, 0u)) {}
+  ~VertexArray() {
+    if (id)
+      dropVertexArray(exchange(id, 0u));
+  }
+  void bind() const {
+    check(id);
+    bindVertexArray(id);
+  }
+private:
+  u32 id;
+};
+
+struct MultiLineString {
+  VertexArray va {};
   u32 stringBuffer = makeBuffer(64);
   u32 colRowBuffer = makeBuffer(256);
-
-  App() {
-    useProgram(textProgram);
-    vertexAttributeArrayU8(0, stringBuffer, 1, 0, 0, 0, 1);
-
-    useProgram(multiLineTextProgram);
+  u32 size {};
+  MultiLineString() {
+    va.bind();
     vertexAttributeArrayU8(0, stringBuffer, 1, 0, 0, 0, 1);
     vertexAttributeArrayI16(1, colRowBuffer, 2, 0, 0, 0, 1);
   }
+  void set(Str string) {
+    size = len(string);
 
-  void key(Key key) {
-    if (key == Backspace) {
-      if (string)
-        string.pop();
-    } else if (key == Space) {
-      string.push(' ');
-    } else if (key == Enter) {
-      string.push('\n');
-    } else {
-      u32 letter = u32(key - KeyA);
-      if (letter < 26)
-        string.push('A' + letter);
-    }
-  }
-
-  void draw() {
     // lay out string
     i16 row = 0;
     i16 col = 0;
@@ -305,10 +311,45 @@ struct App {
     for (u32 i: range(len(string)))
       colRow[i][1] -= row;
 
-    useProgram(multiLineTextProgram);
     fillBuffer(stringBuffer, 0, string.begin(), len(string));
     fillBuffer(colRowBuffer, 0, colRow.begin(), len(colRow) * 4);
-    drawTriangleStripInstanced(0, 4, len(string));
+  }
+  void draw() {
+    va.bind();
+    useProgram(multiLineTextProgram);
+    drawTriangleStripInstanced(0, 4, size);
+  }
+};
+
+struct App {
+  List<char> string;
+  MultiLineString str;
+
+  App() {}
+
+  void key(Key key) {
+    if (key == Backspace) {
+      if (string) {
+        string.pop();
+        str.set(string);
+      }
+    } else if (key == Space) {
+      string.push(' ');
+      str.set(string);
+    } else if (key == Enter) {
+      string.push('\n');
+      str.set(string);
+    } else {
+      u32 letter = u32(key - KeyA);
+      if (letter < 26) {
+        string.push('A' + letter);
+        str.set(string);
+      }
+    }
+  }
+
+  void draw() {
+    str.draw();
   }
 };
 
@@ -321,6 +362,32 @@ void start() {
   make_texture(font_data, sizeof(font_data));
 
   textProgram = make_text_program();
+
+  u32 circle_vshader = make_vertex_shader(R"gl(#version 300 es
+layout (location = 0) in highp vec2 center;
+layout (location = 1) in highp vec2 radius;
+out highp vec2 vCoord;
+void main() {
+  vCoord = vec2(2 * ivec2(gl_VertexID % 2, gl_VertexID / 2) - 1);
+  gl_Position = vec4(center + vCoord * radius, 0, 1);
+}
+)gl");
+  u32 circle_fshader = make_fragment_shader(R"gl(#version 300 es
+uniform Resolution {
+  highp vec2 uResolution;
+};
+in highp vec2 vCoord;
+out lowp vec4 oColor;
+void main() {
+  highp float rad = length(vCoord);
+  if (rad > 1.1)
+    discard;
+  highp float color = min(1.0, (1.1 - rad) * 5.0);
+  oColor = vec4(color, color, color, 1);
+}
+)gl");
+  circleProgram = make_program((u32[]) {circle_vshader, circle_fshader});
+
   app = new App;
   u32 s0 = make_vertex_shader(R"gl(#version 300 es
 #define pi 3.1415926535897932
@@ -411,6 +478,8 @@ void main() {
   bindUniformBlock(textProgram, textResolution, 2);
   u32 mltr = getUniformBlock(multiLineTextProgram, "Resolution");
   bindUniformBlock(multiLineTextProgram, mltr, 2);
+  u32 cr = getUniformBlock(circleProgram, "Resolution");
+  bindUniformBlock(circleProgram, cr, 2);
 }
 
 void scroll(f32 x, f32 y, f32 dx, f32 dy) {
@@ -455,6 +524,11 @@ void draw() {
   drawPoints(0, 1);
 
   app->draw();
+
+  useProgram(circleProgram);
+  bindVertexArray(0);
+  demo();
+  drawTriangleStripInstanced(0, 4, 1);
 
   redraw();
 }

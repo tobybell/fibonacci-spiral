@@ -39,11 +39,27 @@ const ctx = {
 
 let memory;
 const shaders = [];
+const vaos = [];
 const programs = [];
 const buffers = [];
 const decoder = new TextDecoder();
 const env = {
   abort() { throw 0; },
+  demo() {
+    gl.vertexAttrib2f(0, 0, 0);
+    gl.vertexAttrib2f(1, 0.1, 0.1);
+  },
+  makeVertexArray() {
+    const id = vaos.length + 1;
+    vaos.push(gl.createVertexArray());
+    return id;
+  },
+  bindVertexArray(vertexArray) {
+    gl.bindVertexArray(vaos[vertexArray - 1]);
+  },
+  dropVertexArray(vertexArray) {
+    gl.deleteVertexArray(vaos[vertexArray - 1]);
+  },
   make_vertex_shader(source, len) {
     const id = shaders.length;
     const data = decoder.decode(new Uint8Array(memory, source, len));
