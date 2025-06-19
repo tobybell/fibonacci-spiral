@@ -19,7 +19,6 @@ Object.assign(document.body.style, {
 });
 
 const gl = canvas.getContext('webgl2');
-gl.enable(gl.DEPTH_TEST);
 
 const create_shader = (gl, type, source) => {
   const shader = gl.createShader(type);
@@ -37,6 +36,8 @@ const ctx = {
   draw: null,
 };
 
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
 let memory;
 const shaders = [];
 const vaos = [];
@@ -45,10 +46,19 @@ const buffers = [];
 const decoder = new TextDecoder();
 const env = {
   abort() { throw 0; },
+  enableBlend() { gl.enable(gl.BLEND); },
+  disableBlend() { gl.disable(gl.BLEND); },
+  enableDepthTest() { gl.enable(gl.DEPTH_TEST); },
+  disableDepthTest() { gl.disable(gl.DEPTH_TEST); },
   demo() {
     gl.vertexAttrib2f(0, 0, 0);
-    gl.vertexAttrib2f(1, 0.1, 0.1);
+    gl.vertexAttrib1f(1, 10);//0.1, 0.1);
+    gl.enable(gl.BLEND);
   },
+  vertexAttrib1f(attrib, x) { gl.vertexAttrib1f(attrib, x); },
+  vertexAttrib2f(attrib, x, y) { gl.vertexAttrib2f(attrib, x, y); },
+  vertexAttrib3f(attrib, x, y, z) { gl.vertexAttrib3f(attrib, x, y, z); },
+  vertexAttrib4f(attrib, x, y, z, w) { gl.vertexAttrib4f(attrib, x, y, z, w); },
   makeVertexArray() {
     const id = vaos.length + 1;
     vaos.push(gl.createVertexArray());
@@ -173,8 +183,8 @@ WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
   const exports = mod.instance.exports;
   exports.start();
 
-
   const draw = () => {
+    console.log('full draw');
     gl.clear(gl.COLOR_BUFFER_BIT);
     ctx.needsDraw = false;
     exports.draw();
@@ -193,7 +203,6 @@ WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
   }, false);
 
   const resize = () => {
-    console.log('resize', window.innerWidth, window.innerHeight);
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     exports.resize(window.innerWidth, window.innerHeight);

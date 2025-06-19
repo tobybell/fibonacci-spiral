@@ -59,7 +59,7 @@ struct Allocator {
     u32 needed = (size + 7u) & ~7u;
     auto p = (u64*) alloc_8byte_aligned(needed);
     for (auto i = p, end = p + needed / 8; i < end; ++i)
-      *p = 0;
+      *i = 0;
     return p;
   }
 
@@ -257,3 +257,5 @@ void free(void* ptr) {
 }
 
 [[nodiscard]] void* operator new(uptr size) { return malloc(size); }
+
+void operator delete(void* p) noexcept { return free(p); }
