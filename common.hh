@@ -334,10 +334,14 @@ struct Ref {
   constexpr Ref(T* b, u32 s): base(b), size(s) {}
   template <u32 N>
   constexpr Ref(T (&x)[N]): base(x), size(N) {}
+  template <u32 N>
+  constexpr Ref(T (&&x)[N]): base(x), size(N) {}
   friend u32 len(Ref const& x) { return x.size; }
   T* begin() const { return base; }
   T* end() const { return base + size; }
   T& operator[](u32 i) const { check(i < size); return base[i]; }
+  operator Ref<T const>() const { return {base, size}; }
+  explicit operator bool() const { return size; }
 };
 
 template <class T>
@@ -355,23 +359,6 @@ constexpr Str to_str(char const* s) {
     ++i;
   return {s, i};
 }
-
-template <class T>
-struct Mut {
-  T* base;
-  u32 size;
-  constexpr Mut() = default;
-  constexpr Mut(T* base_, u32 size_): base(base_), size(size_) {}
-  template <u32 N>
-  constexpr Mut(T (&arr)[N]): base(arr), size(N) {}
-  T* begin() const { return base; }
-  T* end() const { return base + size; }
-  T& operator[](u32 index) const { return base[index]; }
-  friend u32 len(Mut const& x) { return x.size; }
-  explicit operator bool() const { return size; }
-  Span<T> span() const { return {base, size}; }
-  operator Span<T>() const { return {base, size}; }
-};
 
 template <class T>
 struct Array {
@@ -398,7 +385,7 @@ struct Array {
         new (&data[i]) T(span[i]);
     }
   }
-  Array(Mut<T> span): Array(span.span()) {}
+  Array(Ref<T> span): Array(span.span()) {}
   Array(Array const& rhs): Array(Span<T>(rhs)) {}
   Array(Array&& rhs):
     data(::exchange(rhs.data, nullptr)), size(::exchange(rhs.size, 0u)) {}
@@ -427,13 +414,13 @@ struct Array {
   T const* end() const { return begin() + size; }
   explicit operator bool() const { return size; }
   friend u32 len(Array const& list) { return list.size; }
-  T& operator[](u32 index) { return data[index]; }
-  T const& operator[](u32 index) const { return data[index]; }
+  T& operator[](u32 i) { check(i < size); return data[i]; }
+  T const& operator[](u32 i) const { check(i < size); return data[i]; }
   Span<T> span() const { return {data, size}; }
-  Mut<T> mut() { return {data, size}; }
+  Ref<T> mut() { return {data, size}; }
 
   explicit operator bool() { return size; }
-  operator Mut<T>() { return {data, size}; }
+  operator Ref<T>() { return {data, size}; }
   operator Span<T>() const { return {data, size}; }
 
   friend T const& last(Array const& arr) {
@@ -458,6 +445,11 @@ struct List {
         new (&data[i]) T(rhs[i]);
     }
   }
+
+  List(Ref<T> y): List(Span<T>(y)) {}
+
+  template <u32 N>
+  List(T const (&y)[N]): List(Ref(y)) {}
 
   List(List const& rhs): List(rhs.span()) {}
 
@@ -520,6 +512,11 @@ struct List {
     return data[size - 1];
   }
 
+  T& last() {
+    check(size);
+    return data[size - 1];
+  }
+
   void expand(u32 needed) {
     if (needed <= capacity)
       return;
@@ -563,6 +560,7 @@ struct List {
 
   Span<T> span() const { return {data, size}; }
   operator Span<T>() const { return span(); }
+  operator Ref<T>() { return {data, size}; }
 
   friend T const& last(List const& list) {
     check(!!list);
@@ -618,7 +616,7 @@ struct ArrayList {
   ArrayList(List<T> list_, List<u32> ofs_):
     list(::move(list_)), ofs(::move(ofs_)) {}
 
-  Mut<T> push_empty(u32 size) {
+  Ref<T> push_empty(u32 size) {
     auto orig_size = list.size;
     list.expand(list.size + size);
     list.size += size;
@@ -626,7 +624,7 @@ struct ArrayList {
     return {&list[orig_size], size};
   }
 
-  Mut<T> push(Span<T> items) {
+  Ref<T> push(Span<T> items) {
     auto storage = push_empty(len(items));
     copy(storage.begin(), items);
     return storage;
@@ -638,7 +636,7 @@ struct ArrayList {
   }
 
   friend u32 len(ArrayList const& list) { return list.ofs.size - 1; }
-  Mut<T> operator[](u32 index) {
+  Ref<T> operator[](u32 index) {
     return {&list[ofs[index]], ofs[index + 1] - ofs[index]};
   }
   Span<T> operator[](u32 index) const {
@@ -773,7 +771,7 @@ struct ArrayArray {
   Array<u32> offsets;
 
   friend u32 len(ArrayArray const& array) { return len(array.offsets) - 1; }
-  Mut<T> operator[](u32 index) {
+  Ref<T> operator[](u32 index) {
     return {&items[offsets[index]], offsets[index + 1] - offsets[index]};
   }
   Span<T> operator[](u32 index) const {
@@ -790,8 +788,7 @@ struct Own {
   Own(Own<S>&& rhs): ptr(rhs.release()) {}
   ~Own() {
     if (ptr)
-      ptr->~T();
-    free(::exchange(ptr, nullptr));
+      delete ptr;
   }
   void operator=(Own rhs) { swap(ptr, rhs.ptr); }
   T* operator->() const { return ptr; }
@@ -832,6 +829,7 @@ template <class... T>
 struct Func {
   void* obj;
   void (*call)(T..., void*);
+  Func(): call() {}
   template <
       class F,
       enable_if<
@@ -846,6 +844,7 @@ struct Func {
   void operator()(T... arg) const {
     return call(::forward<T>(arg)..., obj);
   }
+  explicit operator bool() const { return call; }
 };
 
 template <class T>

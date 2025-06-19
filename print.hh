@@ -50,7 +50,7 @@ inline void print(T (&arr)[N], Print& s_) {
 }
 
 template <class T>
-inline void print(Span<T> arr, Print& s_) {
+inline void print(Ref<T> arr, Print& s_) {
   using TC = T const;
   print_array(
       reinterpret_cast<char const*>(arr.begin()), sizeof(T), len(arr),

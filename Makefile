@@ -8,6 +8,6 @@ build/%.o: build/%.ll
 	llc -o $@ -march=wasm32 -filetype=obj $<
 
 build/%.ll: %.cc
-	clang++ -o $@ --target=wasm32 -mbulk-memory -emit-llvm -O2 -S -MD -std=c++17 -c $<
+	clang++ -o $@ --target=wasm32 -mbulk-memory -emit-llvm -fno-rtti -O2 -S -MD -std=c++17 -c $<
 
 -include $(OBJECTS:.o=.d)

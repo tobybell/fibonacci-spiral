@@ -1,5 +1,6 @@
 #include "print.hh"
 #include "gui.hh"
+#include "sort.hh"
 
 using f32 = float;
 
@@ -23,12 +24,20 @@ void make_texture(void const* data, u32 size);
 f32 cos(f32);
 f32 sin(f32);
 void test(u32);
+void vertexAttrib1f(u32 attrib, f32);
+void vertexAttrib2f(u32 attrib, f32, f32);
+void vertexAttrib3f(u32 attrib, f32, f32, f32);
+void vertexAttrib4f(u32 attrib, f32, f32, f32, f32);
 void vertexAttributeArrayU8(
   u32 attrib, u32 buffer, u32 components, bool normalized, u8 stride,
   u32 offset, u32 instanceDivisor);
 void vertexAttributeArrayI16(
   u32 attrib, u32 buffer, u32 components, bool normalized, u8 stride,
   u32 offset, u32 instanceDivisor);
+void enableBlend();
+void disableBlend();
+void enableDepthTest();
+void disableDepthTest();
 
 void set_viewport(i32 x, i32 y, u32 dx, u32 dy);
 void useProgram(u32 program);
@@ -42,6 +51,15 @@ void draw();
 void scroll(f32 x, f32 y, f32 dx, f32 dy);
 void key(u32 id);
 void resize(u32 width, u32 height);
+
+}
+
+namespace {
+
+template <class T, class F>
+void sort(Ref<T> elem, F&& cmp) {
+  quicksort(elem.begin(), elem.end(), cmp);
+}
 
 }
 
@@ -142,6 +160,8 @@ u32 pointProgram;
 u32 textProgram;
 u32 multiLineTextProgram;
 u32 circleProgram;
+u32 rectProgram;
+f32 gWidth, gHeight;  // resolution
 
 u32 uModelBuffer;
 u32 uResolutionBuffer;
@@ -253,11 +273,13 @@ void main() {
   uint pixel = bit / 8u;
   uint texel = texelFetch(u_image, ivec2(pixel, 0), 0).r;
   uint ans = (texel >> (bit % 8u)) & 1u;
-  oColor = vec4(ans, ans, ans, 1);
+  if (ans == 0u)
+    discard;
+  oColor = vec4(1, 1, 1, 1);
 }
   )gl"_s);
 
-  multiLineTextProgram = make_program((u32[]) {v_multiline, s1}); 
+  multiLineTextProgram = make_program((u32[]) {v_multiline, s1});
 
   return make_program((u32[]) {s0, s1});
 }
@@ -280,6 +302,50 @@ struct VertexArray {
 private:
   u32 id;
 };
+
+union Vec3 {
+  f32 elem[3];
+  struct {
+    f32 x, y, z;
+  };
+};
+
+Vec3 rgbu8(u8 r, u8 g, u8 b) {
+  return {f32(r) / 255, f32(g) / 255, f32(b) / 255};
+}
+
+Vec3 grayu8(u8 g) { return rgbu8(g, g, g); }
+
+void circle(f32 x, f32 y, f32 r, Vec3 topColor, Vec3 bottomColor) {
+  useProgram(circleProgram);
+  enableBlend();
+  bindVertexArray(0);
+  vertexAttrib2f(0, x, y);
+  vertexAttrib1f(1, r);
+  vertexAttrib3f(2, topColor.x, topColor.y, topColor.z);
+  vertexAttrib3f(3, bottomColor.x, bottomColor.y, bottomColor.z);
+  drawTriangleStripInstanced(0, 4, 1);
+  disableBlend();
+}
+
+void enabledRadioButton(f32 x, f32 y) {
+  circle(x, y, 7, rgbu8(28, 106, 230), rgbu8(24, 94, 206));
+  circle(x, y, 3, {1, 1, 1}, {1, 1, 1});
+}
+
+void disabledRadioButton(f32 x, f32 y) {
+  circle(x, y, 7, grayu8(60), grayu8(93));
+}
+
+void drawRect(u32 x, u32 y, u32 w, u32 h, Vec3 color) {
+  useProgram(rectProgram);
+  bindVertexArray(0);
+  vertexAttrib4f(
+    0, -1 + f32(x) * 2 / gWidth, 1 - f32(y) * 2 / gHeight, f32(w) * 2 / gWidth,
+    -f32(h) * 2 / gHeight);
+  vertexAttrib3f(1, color.x, color.y, color.z);
+  drawTriangleStripInstanced(0, 4, 1);
+}
 
 struct MultiLineString {
   VertexArray va {};
@@ -321,13 +387,415 @@ struct MultiLineString {
   }
 };
 
+template <class T>
+struct State {
+  T value;
+  List<Func<T>> subscribers;
+  List<u32> free;
+
+  template <class F>
+  auto operator()(F&& f) {
+    u32 id;
+    if (free) {
+      id = free.last();
+      free.pop();
+    } else {
+      id = len(subscribers);
+      subscribers.emplace();
+    }
+    subscribers[id] = move(f);
+    subscribers[id](value);
+    return [this, id]() {
+      if (id + 1 == len(subscribers))
+        return subscribers.pop();
+      subscribers[id] = {};
+      free.push(id);
+    };
+  }
+
+  void operator=(T newValue) {
+    value = newValue;
+    for (auto& s: subscribers) {
+      if (s)
+        s(value);
+    }
+  }
+};
+
+struct Work {
+  void (*call)(void*) = 0;
+  void* obj;
+  Work() = default;
+  template <
+      class F,
+      enable_if<
+          is_invocable<F> && is_move_constructible<F> &&
+          (sizeof(obj) < sizeof(F) || !is_trivially_copyable<F>)> = 0>
+  Work(F&& f):
+    call([](void* arg) {
+      auto fn = reinterpret_cast<F*>(arg);
+      (*fn)();
+      delete fn;
+    }), obj(new F(move(f))) {}
+  template <
+      class F,
+      enable_if<
+          is_invocable<F> && is_move_constructible<F> &&
+          sizeof(F) <= sizeof(obj) && is_trivially_copyable<F>> = 0>
+  Work(F&& f):
+    call([](void* arg) {
+      alignas(F) char data[sizeof(F)];
+      memcpy(data, &arg, sizeof(F));
+      auto& fn = *reinterpret_cast<F*>(data);
+      fn();
+      fn.~F();
+    }),
+    obj() {
+    new (&obj) F(move(f));
+  }
+  Work(Work const&) = delete;
+  Work(Work&& y): call(exchange(y.call, nullptr)), obj(y.obj) {}
+  void operator=(Work y) {
+    swap(call, y.call);
+    obj = y.obj;
+  }
+  ~Work() { check(!call); }
+  void operator()() {
+    call(obj);
+    call = 0;
+  }
+};
+
+struct Node {
+  u32 x, y, width, height;
+  virtual void layout() = 0;
+  virtual void draw() = 0;
+};
+
+struct Column: Node {
+  List<Node*> kids;
+  void layout() override {
+    u32 y = 0;
+    u32 x = 0;
+    for (auto kid_ptr: kids) {
+      auto& kid = *kid_ptr;
+      kid.layout();
+      kid.x = 0;
+      kid.y = y;
+      y += kid.height;
+      if (kid.width > x)
+        x = kid.width;
+    }
+    height = y;
+    width = x;
+  }
+  void draw() override {
+    for (auto kid: kids)
+      kid->draw();
+  }
+};
+
+template <class... T>
+auto column(T&&... kids) {
+  auto p = new Column;
+  (p->kids.push(kids), ...);
+  return p;
+}
+
+enum Direction: u8 { X, Y };
+
+struct LayoutEntry {
+  u32 min[2];
+  bool grow[2];
+  u32 kids;
+  Direction direction;  // meaningless if `!kids`
+};
+
+template <class T>
+T elemtype(Array<T> const&);
+template <class T>
+T elemtype(List<T> const&);
+template <class T>
+T elemtype(T const&);
+
+template <class T>
+struct Cat {
+  static T const* dat(T const& x) { return &x; }
+  static T const* dat(List<T> const& x) { return x.begin(); }
+  static T const* dat(Array<T> const& x) { return x.begin(); }
+  static u32 get_len(T const& x) { return 1; }
+  static u32 get_len(List<T> const& x) { return len(x); }
+  static u32 get_len(Array<T> const& x) { return len(x); }
+  template <class S>
+  static void put(T*& dst, S const& src) {
+    u32 n = get_len(src);
+    memcpy(dst, dat(src), sizeof(T) * n);
+    dst += n;
+  }
+  template <class... S>
+  static Array<T> cat(S const&... r) {
+    Array<T> ans((... + get_len(r)));
+    auto i = ans.begin();
+    ((put(i, r)), ...);
+    return ans;
+  }
+};
+
+template <class S, class... T>
+auto cat(S const& s, T const&... r) {
+  return Cat<decltype(elemtype(s))>::cat(s, r...);
+}
+
+template <class... T>
+auto col(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
+  return cat(LayoutEntry {{minx, miny}, {growx, growy}, sizeof...(T), Y}, kids...);
+}
+
+template <class... T>
+auto row(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
+  return cat(LayoutEntry {{minx, miny}, {growx, growy}, sizeof...(T), X}, kids...);
+}
+
+struct Kids {
+  Array<u32> kids;
+  Array<u32> end;
+  Kids(Span<LayoutEntry> node) {
+    u32 n = len(node);
+    kids = Array<u32>(n);
+    u32 n_out = 0;
+    u32 n_end = 0;
+    List<u32> stack;
+    for (u32 i = 0; i < n; ++i) {
+      u32 n_kids = node[i].kids;
+      for (u32 i = n_kids; i; --i)
+        kids[n_out++] = stack[stack.size - i];
+      stack.size -= n_kids;
+      end[i] = n_out;
+      stack.push(i);
+    }
+    check(n_out == n);
+  }
+  Ref<u32> operator[](u32 i) {
+    u32 begin = i ? end[i - 1] : 0;
+    return {kids.begin() + begin, end[i] - begin};
+  }
+};
+
+template <class T>
+Span<T> slice(List<T> const& x, u32 base) {
+  check(base <= len(x));
+  return {x.begin() + base, len(x) - base};
+}
+
+struct GrowthDistribution {
+  u32 how_many_kids_can_we_grow;
+  u32 to_what_total_size;
+};
+
+static GrowthDistribution growth_distribution(
+    Span<u32> sizes, Span<u32> sorted_kids, u32 budget) {
+  u32 n = len(sorted_kids);
+  for (u32 i = 0; i < n; ++i) {
+    u32 cur_kid_size = sizes[sorted_kids[i]];
+    u32 next_budget = budget + cur_kid_size;
+    u32 fill_line = next_budget / (i + 1);
+    if (fill_line < cur_kid_size)  // mustn't make any child smaller
+      return {i, budget};
+    budget = next_budget;
+  }
+  return {n, budget};
+}
+
+template <class T>
+void reverse(Ref<T> ref) {
+  if (!ref)
+    return;
+  auto a = ref.begin();
+  auto b = ref.end() - 1;
+  while (a < b) {
+    swap(*a, *b);
+    ++a;
+    --b;
+  }
+}
+
+struct Dimension {
+  Array<u32> size;
+  Array<u32> pos;
+
+  Dimension(
+    Span<LayoutEntry> node, u32 available, Direction d) {
+    u32 n = len(node);
+
+    ArrayList<u32> node_growable_kids;
+    {
+      List<u32> stack;
+      List<u32> since;
+      for (u32 i = n; i--;) {
+        u32 n_since = len(since);
+        since.push(len(stack));
+        u32 n_kids = node[i].kids;
+        u32 since_i = since[n_since - n_kids];
+        since.size -= n_kids;
+        node_growable_kids.push(slice(stack, since_i));
+        stack.size = since_i;
+        if (node[i].grow[d])
+          stack.push(i);
+      }
+    }
+
+    {
+      reverse<u32>(node_growable_kids.list);
+      reverse<u32>(node_growable_kids.ofs);
+      u32 end = len(node_growable_kids.list);
+      for (u32& ofs: node_growable_kids.ofs)
+        ofs = end - ofs;
+    }
+
+    // bottom-up: compute minimum size
+    //   just add up children
+    List<u32> stack;
+    size = Array<u32>(n);
+    for (u32 i = n; i--;) {
+      u32 n_kids = node[i].kids;
+      if (!n_kids) {
+        size[i] = node[i].min[d];
+        stack.push(node[i].min[d]);
+      } else if (node[i].direction == d) {
+        u32 sum = 0;
+        for (u32 j = 0; j < n_kids; ++j) {
+          sum += stack.last();
+          stack.pop();
+        }
+        size[i] = sum;
+        stack.push(sum);
+
+      } else {
+        u32 max = 0;
+        for (u32 j = 0; j < n_kids; ++j) {
+          if (stack.last() > max)
+            max = stack.last();
+          stack.pop();
+        }
+        size[i] = max;
+        stack.push(max);
+      }
+    }
+
+    check(len(stack) == 1);
+    u32 total = stack.last();
+
+    if (!node[0].grow[d])
+      return;
+
+    auto orig_size = size;
+
+    // top-down: compute actual size (based on available)
+    //   distribute extra space to growable children
+    size[0] = available;
+    for (u32 i = 0; i < n; ++i) {
+      if (!node[i].grow[d])
+        continue;
+      // node is growable in the current dimension
+      u32 avail = size[i];
+      check(avail >= orig_size[i]);  // TODO
+      u32 amount = avail - orig_size[i];
+
+      if (node[i].direction == d) {  // longitudinal
+
+        // now, want to get all growable kids
+        // want to sort by current size
+        // go up from bottom
+        auto gkids = node_growable_kids[i];
+        sort(gkids, [this](u32 k0, u32 k1) { return size[k0] < size[k1]; });
+
+        auto gdist = growth_distribution(size, gkids, amount);
+        for (u32 j: range(gdist.how_many_kids_can_we_grow)) {
+          u32 size_j = gdist.to_what_total_size / (gdist.how_many_kids_can_we_grow - j);
+          size[gkids[j]] = size_j;
+          gdist.to_what_total_size -= size_j;
+        }
+
+      } else {  // transverse
+        // get all growable children, grow them to this size
+        for (u32 k: node_growable_kids[i])
+          size[k] = avail;
+      }
+    }
+
+    struct PosContext {
+      u32 value;
+      u32 count;
+      bool increment;
+    };
+    List<PosContext> pstack;
+    pstack.push({0, 1, 0});
+    pos = Array<u32>(n);
+    for (u32 i = 0; i < n; ++i) {
+      auto& top = pstack.last();
+      pos[i] = top.value;
+      --top.count;
+      if (top.count) {
+        if (top.increment)
+          top.value += size[i];
+      } else
+        pstack.pop();
+      u32 n_kids = node[i].kids;
+      if (n_kids)
+        pstack.push({pos[i], n_kids, node[i].direction == d});
+    }
+  }
+};
+
+struct RadioButton: Node {
+  void layout() override {
+    height = width = 14;
+  }
+  void draw() override {
+    u32 cx = x + 7;
+    u32 cy = y + 7;
+    enabledRadioButton(-1 + f32(cx) * 2 / gWidth, 1 - f32(cy) * 2 / gHeight);
+  }
+};
+
+constexpr auto radio_button = [](State<bool>& enabled) {
+  return [&enabled]() {
+    return enabled([&](bool val) {
+      u32 cx = 30;
+      u32 cy = 30;
+      f32 x = -1 + f32(cx) * 2 / gWidth;
+      f32 y = 1 - f32(cy) * 2 / gHeight;
+      val ? enabledRadioButton(x, y) : disabledRadioButton(x, y);
+    });
+  };
+};
+
+constexpr Vec3 red {1, 0, 0};
+constexpr Vec3 green {0, 1, 0};
+constexpr Vec3 blue {0, 0, 1};
+
 struct App {
   List<char> string;
   MultiLineString str;
 
-  App() {}
+  State<bool> onoff;
+  Work cleanup;
+
+  Column* c = column(new RadioButton, new RadioButton);
+
+  App() {
+    c->layout();
+
+    //auto cmp = radio_button(onoff);
+    //cleanup = cmp();
+  }
+
+  ~App() {
+    cleanup();
+  }
 
   void key(Key key) {
+    onoff = !onoff.value;
     if (key == Backspace) {
       if (string) {
         string.pop();
@@ -349,6 +817,7 @@ struct App {
   }
 
   void draw() {
+    c->draw();
     str.draw();
   }
 };
@@ -364,29 +833,65 @@ void start() {
   textProgram = make_text_program();
 
   u32 circle_vshader = make_vertex_shader(R"gl(#version 300 es
+uniform Resolution {
+  highp vec2 uResolution;
+  highp vec2 uPixel;
+};
 layout (location = 0) in highp vec2 center;
-layout (location = 1) in highp vec2 radius;
+layout (location = 1) in highp float radius;
+layout (location = 2) in highp vec3 aTop;
+layout (location = 3) in highp vec3 aBottom;
 out highp vec2 vCoord;
+out highp float vGradient;
+flat out highp float vRadius;
+flat out lowp vec3 vTop;
+flat out lowp vec3 vBottom;
 void main() {
-  vCoord = vec2(2 * ivec2(gl_VertexID % 2, gl_VertexID / 2) - 1);
-  gl_Position = vec4(center + vCoord * radius, 0, 1);
+  vec2 coord = vec2(2 * ivec2(gl_VertexID % 2, gl_VertexID / 2) - 1);
+  vGradient = float(gl_VertexID / 2);
+  vRadius = radius + 0.5;
+  vCoord = coord * vRadius;
+  vTop = aTop;
+  vBottom = aBottom;
+  gl_Position = vec4(center + vCoord * uPixel, 0, 1);
 }
 )gl");
   u32 circle_fshader = make_fragment_shader(R"gl(#version 300 es
-uniform Resolution {
-  highp vec2 uResolution;
-};
 in highp vec2 vCoord;
+in highp float vGradient;
+flat in highp float vRadius;
+flat in lowp vec3 vTop;
+flat in lowp vec3 vBottom;
 out lowp vec4 oColor;
 void main() {
   highp float rad = length(vCoord);
-  if (rad > 1.1)
+  if (rad >= vRadius)
     discard;
-  highp float color = min(1.0, (1.1 - rad) * 5.0);
-  oColor = vec4(color, color, color, 1);
+  highp float alpha = min(1.0, vRadius - rad);
+  lowp vec3 color = vTop * vGradient + vBottom * (1.0 - vGradient);
+  oColor = vec4(color, alpha);
 }
 )gl");
   circleProgram = make_program((u32[]) {circle_vshader, circle_fshader});
+
+  u32 rect_vshader = make_vertex_shader(R"gl(#version 300 es
+layout (location = 0) in mediump vec4 aRect;
+layout (location = 1) in mediump vec3 aColor;
+flat out lowp vec3 vColor;
+void main() {
+  vec2 coord = vec2(gl_VertexID % 2, gl_VertexID / 2);
+  vColor = aColor;
+  gl_Position = vec4(aRect.xy + coord * aRect.zw, 0, 1);
+}
+)gl");
+  u32 rect_fshader = make_fragment_shader(R"gl(#version 300 es
+flat in lowp vec3 vColor;
+out lowp vec4 oColor;
+void main() {
+  oColor = vec4(vColor, 1);
+}
+)gl");
+  rectProgram = make_program((u32[]) {rect_vshader, rect_fshader});
 
   app = new App;
   u32 s0 = make_vertex_shader(R"gl(#version 300 es
@@ -493,9 +998,41 @@ void key(u32 id) {
 f32 aspect = 1;
 
 void resize(u32 width, u32 height) {
+  gWidth = f32(width);
+  gHeight = f32(height);
   aspect = f32(width) / f32(height);
   fillBuffer(uResolutionBuffer, 0, (f32[]) {f32(width), f32(height)}, 8);
+  fillBuffer(uResolutionBuffer, 8, (f32[]) {2 / f32(width), 2 / f32(height)}, 8);
   set_viewport(0, 0, width, height);
+
+  {
+    auto sidebar = col(200, 0, 0, 1);
+    auto title_bar = row(0, 0, 1, 0,
+        row(200, 0, 1, 1),  // left spacer
+        row(400, 30, 0, 0), // title
+        row(0, 0, 1, 1)  // right spacer
+      );
+    auto lay = row(0, 0, 1, 1,
+      sidebar,
+      col(0, 0, 1, 1,
+        title_bar,
+        // tab bar
+        row(0, 0, 1, 0,
+          row(200, 40, 1, 0),  // left tab
+          row(200, 40, 1, 0)  // right tab
+        ),
+        row(0, 0, 1, 1)  // main content
+      ));
+
+    Dimension x {lay, width, X};
+    Dimension y {lay, height, Y};
+
+    for (u32 i: range(len(lay))) {
+      drawRect(x.pos[i], y.pos[i], x.size[i], y.size[i], grayu8(i * 137));
+    }
+  }
+
+  app->draw();
 }
 
 struct ModelUnifom {
@@ -516,19 +1053,16 @@ void draw() {
 
   fillBuffer(uModelBuffer, 0, &u, sizeof(u));
 
+  enableDepthTest();
   useProgram(program);
   u32 N = 32;
   drawPoints(0, N * N);
 
   useProgram(pointProgram);
   drawPoints(0, 1);
+  disableDepthTest();
 
   app->draw();
 
-  useProgram(circleProgram);
-  bindVertexArray(0);
-  demo();
-  drawTriangleStripInstanced(0, 4, 1);
-
-  redraw();
+  //redraw();
 }
