@@ -507,10 +507,15 @@ enum Direction: u8 { X, Y };
 struct LayoutEntry {
   u32 min[2];
   u16 childGap;
+  u16 pad[4];  // [Direction][Side]
   bool grow[2];
   u32 kids;
   Direction direction;  // meaningless if `!kids`
 };
+
+u32 totalPad(LayoutEntry const& n, Direction d) {
+  return n.pad[2 * d] + n.pad[2 * d + 1];
+}
 
 template <class T>
 T elemtype(Array<T> const&);
@@ -549,25 +554,25 @@ auto cat(S const& s, T const&... r) {
 
 template <class... T>
 auto col(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, 0, {growx, growy}, sizeof...(T), Y}, kids...);
+  return cat(LayoutEntry {{minx, miny}, 0, {}, {growx, growy}, sizeof...(T), Y}, kids...);
 }
 
 template <class... T>
 auto colGap(
-    u32 minx, u32 miny, bool growx, bool growy, u16 childGap, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, childGap, {growx, growy}, sizeof...(T), Y}, kids...);
+    u32 minx, u32 miny, bool growx, bool growy, u16 pad, u16 childGap, T&&... kids) {
+  return cat(LayoutEntry {{minx, miny}, childGap, {pad, pad, pad, pad}, {growx, growy}, sizeof...(T), Y}, kids...);
 }
 
 template <class... T>
 auto row(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, 0, {growx, growy}, sizeof...(T), X}, kids...);
+  return cat(LayoutEntry {{minx, miny}, 0, {}, {growx, growy}, sizeof...(T), X}, kids...);
 }
 
 template <u32 N>
 auto text(char const (&x)[N]) {
   u32 len = N - 1;
   check(!x[len]);
-  return cat(LayoutEntry {{6 * len - 1, 7}, 0, {0, 0}, 0, X});
+  return cat(LayoutEntry {{6 * len - 1, 7}, 0, {}, {0, 0}, 0, X});
 }
 
 struct Kids {
@@ -671,17 +676,19 @@ struct Dimension {
     List<u32> stack;
     size = Array<u32>(n);
     for (u32 i = n; i--;) {
-      u32 n_kids = node[i].kids;
+      auto& o = node[i];
+      u32 n_kids = o.kids;
+      auto pad = totalPad(o, d);
       if (!n_kids) {
-        size[i] = node[i].min[d];
-        stack.push(node[i].min[d]);
-      } else if (node[i].direction == d) {
+        size[i] = o.min[d];
+        stack.push(o.min[d]);
+      } else if (o.direction == d) {
         u32 sum = 0;
         for (u32 j = 0; j < n_kids; ++j) {
           sum += stack.last();
           stack.pop();
         }
-        size[i] = sum + node[i].childGap * (n_kids - 1);
+        size[i] = sum + pad + o.childGap * (n_kids - 1);
         stack.push(sum);
       } else {
         u32 max = 0;
@@ -690,7 +697,7 @@ struct Dimension {
             max = stack.last();
           stack.pop();
         }
-        size[i] = max;
+        size[i] = max + pad;
         stack.push(max);
       }
     }
@@ -707,8 +714,6 @@ struct Dimension {
     //   distribute extra space to growable children
     size[0] = available;
     for (u32 i = 0; i < n; ++i) {
-      if (!node[i].grow[d])
-        continue;
       // node is growable in the current dimension
       u32 avail = size[i];
       check(avail >= orig_size[i]);  // TODO
@@ -730,9 +735,10 @@ struct Dimension {
         }
 
       } else {  // transverse
+        u32 innerSpace = avail - totalPad(node[i], d);
         // get all growable children, grow them to this size
         for (u32 k: node_growable_kids[i])
-          size[k] = avail;
+          size[k] = innerSpace;
       }
     }
 
@@ -757,7 +763,7 @@ struct Dimension {
         pstack.pop();
       u32 n_kids = node[i].kids;
       if (n_kids)
-        pstack.push({pos[i], n_kids, node[i].childGap, node[i].direction == d});
+        pstack.push({pos[i] + node[i].pad[2 * d], n_kids, node[i].childGap, node[i].direction == d});
     }
   }
 };
@@ -1027,12 +1033,12 @@ void resize(u32 width, u32 height) {
         row(400, 30, 0, 0), // title
         row(0, 0, 1, 1)  // right spacer
       );
-    auto menu = colGap(0, 0, 0, 0, 5,
-      text("Hello"),
-      text("World"),
-      text("My"),
-      text("Name is"),
-      text("Toby"));
+    auto menu = colGap(0, 0, 0, 0, 5, 5,
+      row(0, 0, 1, 0, text("Hello"), row(0, 0, 1, 0), row(7, 7, 0, 0)),
+      row(0, 0, 1, 0, text("World"), row(0, 0, 1, 0), row(7, 7, 0, 0)),
+      row(0, 0, 1, 0, text("My"), row(0, 0, 1, 0), row(7, 7, 0, 0)),
+      row(0, 0, 1, 0, text("Name is"), row(0, 0, 1, 0), row(7, 7, 0, 0)),
+      row(0, 0, 1, 0, text("Toby"), row(0, 0, 1, 0), row(7, 7, 0, 0)));
     auto lay = row(0, 0, 1, 1,
       sidebar,
       col(0, 0, 1, 1,
