@@ -513,6 +513,8 @@ struct LayoutEntry {
   Direction direction;  // meaningless if `!kids`
 };
 
+constexpr LayoutEntry spacer {.grow = {1, 1}};
+
 u32 totalPad(LayoutEntry const& n, Direction d) {
   return n.pad[2 * d] + n.pad[2 * d + 1];
 }
@@ -1031,14 +1033,13 @@ void resize(u32 width, u32 height) {
     auto title_bar = row(0, 0, 1, 0,
         row(200, 0, 1, 1),  // left spacer
         row(400, 30, 0, 0), // title
-        row(0, 0, 1, 1)  // right spacer
-      );
+        spacer);  // right spacer
     auto menu = colGap(0, 0, 0, 0, 5, 5,
-      row(0, 0, 1, 0, text("Hello"), row(0, 0, 1, 0), row(7, 7, 0, 0)),
-      row(0, 0, 1, 0, text("World"), row(0, 0, 1, 0), row(7, 7, 0, 0)),
-      row(0, 0, 1, 0, text("My"), row(0, 0, 1, 0), row(7, 7, 0, 0)),
-      row(0, 0, 1, 0, text("Name is"), row(0, 0, 1, 0), row(7, 7, 0, 0)),
-      row(0, 0, 1, 0, text("Toby"), row(0, 0, 1, 0), row(7, 7, 0, 0)));
+      row(0, 0, 1, 0, text("Hello"), spacer, row(7, 7, 0, 0)),
+      row(0, 0, 1, 0, text("World"), spacer, row(7, 7, 0, 0)),
+      row(0, 0, 1, 0, text("My"), spacer, row(7, 7, 0, 0)),
+      row(0, 0, 1, 0, text("Name is"), spacer, row(7, 7, 0, 0)),
+      row(0, 0, 1, 0, text("Toby"), spacer, row(7, 7, 0, 0)));
     auto lay = row(0, 0, 1, 1,
       sidebar,
       col(0, 0, 1, 1,
