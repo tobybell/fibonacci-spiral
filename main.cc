@@ -506,6 +506,7 @@ enum Direction: u8 { X, Y };
 
 struct LayoutEntry {
   u32 min[2];
+  u16 childGap;
   bool grow[2];
   u32 kids;
   Direction direction;  // meaningless if `!kids`
@@ -548,12 +549,25 @@ auto cat(S const& s, T const&... r) {
 
 template <class... T>
 auto col(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, {growx, growy}, sizeof...(T), Y}, kids...);
+  return cat(LayoutEntry {{minx, miny}, 0, {growx, growy}, sizeof...(T), Y}, kids...);
+}
+
+template <class... T>
+auto colGap(
+    u32 minx, u32 miny, bool growx, bool growy, u16 childGap, T&&... kids) {
+  return cat(LayoutEntry {{minx, miny}, childGap, {growx, growy}, sizeof...(T), Y}, kids...);
 }
 
 template <class... T>
 auto row(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, {growx, growy}, sizeof...(T), X}, kids...);
+  return cat(LayoutEntry {{minx, miny}, 0, {growx, growy}, sizeof...(T), X}, kids...);
+}
+
+template <u32 N>
+auto text(char const (&x)[N]) {
+  u32 len = N - 1;
+  check(!x[len]);
+  return cat(LayoutEntry {{6 * len - 1, 7}, 0, {0, 0}, 0, X});
 }
 
 struct Kids {
@@ -667,9 +681,8 @@ struct Dimension {
           sum += stack.last();
           stack.pop();
         }
-        size[i] = sum;
+        size[i] = sum + node[i].childGap * (n_kids - 1);
         stack.push(sum);
-
       } else {
         u32 max = 0;
         for (u32 j = 0; j < n_kids; ++j) {
@@ -726,23 +739,25 @@ struct Dimension {
     struct PosContext {
       u32 value;
       u32 count;
+      u16 childGap;
       bool increment;
     };
     List<PosContext> pstack;
-    pstack.push({0, 1, 0});
+    pstack.push({0, 1, 0, 0});
     pos = Array<u32>(n);
     for (u32 i = 0; i < n; ++i) {
       auto& top = pstack.last();
       pos[i] = top.value;
       --top.count;
       if (top.count) {
-        if (top.increment)
-          top.value += size[i];
+        if (top.increment) {
+          top.value += size[i] + top.childGap;
+        }
       } else
         pstack.pop();
       u32 n_kids = node[i].kids;
       if (n_kids)
-        pstack.push({pos[i], n_kids, node[i].direction == d});
+        pstack.push({pos[i], n_kids, node[i].childGap, node[i].direction == d});
     }
   }
 };
@@ -1012,6 +1027,12 @@ void resize(u32 width, u32 height) {
         row(400, 30, 0, 0), // title
         row(0, 0, 1, 1)  // right spacer
       );
+    auto menu = colGap(0, 0, 0, 0, 5,
+      text("Hello"),
+      text("World"),
+      text("My"),
+      text("Name is"),
+      text("Toby"));
     auto lay = row(0, 0, 1, 1,
       sidebar,
       col(0, 0, 1, 1,
@@ -1021,7 +1042,7 @@ void resize(u32 width, u32 height) {
           row(200, 40, 1, 0),  // left tab
           row(200, 40, 1, 0)  // right tab
         ),
-        row(0, 0, 1, 1)  // main content
+        row(0, 0, 1, 1, menu)  // main content
       ));
 
     Dimension x {lay, width, X};
