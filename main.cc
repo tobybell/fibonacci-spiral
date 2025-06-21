@@ -681,17 +681,16 @@ struct Dimension {
       auto& o = node[i];
       u32 n_kids = o.kids;
       auto pad = totalPad(o, d);
+      u32 total;
       if (!n_kids) {
-        size[i] = o.min[d];
-        stack.push(o.min[d]);
+        total = o.min[d];
       } else if (o.direction == d) {
         u32 sum = 0;
         for (u32 j = 0; j < n_kids; ++j) {
           sum += stack.last();
           stack.pop();
         }
-        size[i] = sum + pad + o.childGap * (n_kids - 1);
-        stack.push(sum);
+        total = sum + pad + o.childGap * (n_kids - 1);
       } else {
         u32 max = 0;
         for (u32 j = 0; j < n_kids; ++j) {
@@ -699,9 +698,10 @@ struct Dimension {
             max = stack.last();
           stack.pop();
         }
-        size[i] = max + pad;
-        stack.push(max);
+        total = max + pad;
       }
+      size[i] = total;
+      stack.push(total);
     }
 
     check(len(stack) == 1);
