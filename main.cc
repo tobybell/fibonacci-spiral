@@ -158,6 +158,7 @@ u32 getUniformBlock(u32 program, Str s) { return ::getUniformBlock(program, s.ba
 u32 program;
 u32 pointProgram;
 u32 textProgram;
+u32 textPositionBuffer;
 u32 multiLineTextProgram;
 u32 circleProgram;
 u32 rectProgram;
@@ -223,7 +224,7 @@ GlMat3 rot_y(GlMat3 R0, f32 th) {
 
 }
 
-u32 make_text_program() {
+void make_text_program() {
   u32 v_multiline = make_vertex_shader(R"gl(#version 300 es
 uniform Resolution {
   vec2 uResolution;
@@ -244,6 +245,9 @@ void main() {
 }
   )gl"_s);
   u32 s0 = make_vertex_shader(R"gl(#version 300 es
+uniform Position {
+  ivec2 uPos;
+};
 uniform Resolution {
   vec2 uResolution;
 };
@@ -256,9 +260,9 @@ void main() {
   float glyphStride = 6.0;
   vec2 charSize = glyphSize * 2.0 / uResolution;
   vCoord = vec2(float(gl_VertexID / 2), float(gl_VertexID % 2));
-  vec2 coord = (-1.0 + 20.0 / uResolution) + vCoord * charSize;
-  float shift = glyphStride * 2.0 / uResolution.x;
-  gl_Position = vec4(shift * float(gl_InstanceID) + coord.x, coord.y, 0, 1);
+  vec2 coord = vec2(-1, 1) + vCoord * charSize;
+  vec2 shift = vec2(gl_InstanceID * 6 + uPos.x, -uPos.y) * 2.0 / uResolution;
+  gl_Position = vec4(shift + coord, 0, 1);
 }
   )gl"_s);
   u32 s1 = make_fragment_shader(R"gl(#version 300 es
@@ -281,7 +285,7 @@ void main() {
 
   multiLineTextProgram = make_program((u32[]) {v_multiline, s1});
 
-  return make_program((u32[]) {s0, s1});
+  textProgram = make_program((u32[]) {s0, s1});
 }
 
 // Bits: [128 glyphs][7 rows][5 columns] = 4480 bits
@@ -386,6 +390,19 @@ struct MultiLineString {
     drawTriangleStripInstanced(0, 4, size);
   }
 };
+
+void drawText(Str text, u32 x, u32 y) {
+  u32 size = len(text);
+  VertexArray va {};
+  u32 buf = makeBuffer(size);
+  va.bind();
+  vertexAttributeArrayU8(0, buf, 1, 0, 0, 0, 1);
+  fillBuffer(buf, 0, text.begin(), size);
+  useProgram(textProgram);
+  fillBuffer(textPositionBuffer, 0, (u32[]) {x, y + 7}, 8);
+  drawTriangleStripInstanced(0, 4, size);
+  // TODO: dropBuffer(buf);
+}
 
 template <class T>
 struct State {
@@ -511,9 +528,14 @@ struct LayoutEntry {
   bool grow[2];
   u32 kids;
   Direction direction;  // meaningless if `!kids`
+  void* user;
 };
 
 constexpr LayoutEntry spacer {.grow = {1, 1}};
+
+LayoutEntry minSpace(u32 minSize) {
+  return {.min = {minSize, minSize}, .grow = {1, 1}};
+}
 
 u32 totalPad(LayoutEntry const& n, Direction d) {
   return n.pad[2 * d] + n.pad[2 * d + 1];
@@ -570,11 +592,40 @@ auto row(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
   return cat(LayoutEntry {{minx, miny}, 0, {}, {growx, growy}, sizeof...(T), X}, kids...);
 }
 
+struct Renderable {
+  virtual void draw(i32 x, i32 y, u32 dx, u32 dy) = 0;
+  virtual ~Renderable() = default;
+};
+
+struct RadioNode: Renderable {
+  void draw(i32 x, i32 y, u32 dx, u32 dy) override {
+    check(dx == 14);
+    check(dy == 14);
+    f32 fx = -1 + f32(x + 7) * 2 / gWidth;
+    f32 fy = 1 - f32(y + 7) * 2 / gHeight;
+    enabledRadioButton(fx, fy);
+  }
+};
+
+struct TextNode: Renderable {
+  String text;
+  TextNode(String x): text(move(x)) {}
+  void draw(i32 x, i32 y, u32 dx, u32 dy) override {
+    (void) dx;
+    (void) dy;
+    drawText(text, x, y);
+  }
+};
+
 template <u32 N>
 auto text(char const (&x)[N]) {
   u32 len = N - 1;
   check(!x[len]);
-  return cat(LayoutEntry {{6 * len - 1, 7}, 0, {}, {0, 0}, 0, X});
+  return cat(LayoutEntry {{6 * len - 1, 7}, 0, {}, {0, 0}, 0, X, new TextNode(Ref(x, len))});
+}
+
+auto radioButton() {
+  return LayoutEntry {{14, 14}, 0, {}, {0, 0}, 0, X, new RadioNode};
 }
 
 struct Kids {
@@ -853,7 +904,7 @@ void start() {
   println("Hello!");
   make_texture(font_data, sizeof(font_data));
 
-  textProgram = make_text_program();
+  make_text_program();
 
   u32 circle_vshader = make_vertex_shader(R"gl(#version 300 es
 uniform Resolution {
@@ -1008,6 +1059,11 @@ void main() {
   bindUniformBlock(multiLineTextProgram, mltr, 2);
   u32 cr = getUniformBlock(circleProgram, "Resolution");
   bindUniformBlock(circleProgram, cr, 2);
+
+  textPositionBuffer = makeBuffer(8);
+  bindUniformBuffer(3, textPositionBuffer);
+  u32 textPosition = getUniformBlock(textProgram, "Position");
+  bindUniformBlock(textProgram, textPosition, 3);
 }
 
 void scroll(f32 x, f32 y, f32 dx, f32 dy) {
@@ -1035,11 +1091,11 @@ void resize(u32 width, u32 height) {
         row(400, 30, 0, 0), // title
         spacer);  // right spacer
     auto menu = colGap(0, 0, 0, 0, 5, 5,
-      row(0, 0, 1, 0, text("Hello"), spacer, row(7, 7, 0, 0)),
-      row(0, 0, 1, 0, text("World"), spacer, row(7, 7, 0, 0)),
-      row(0, 0, 1, 0, text("My"), spacer, row(7, 7, 0, 0)),
-      row(0, 0, 1, 0, text("Name is"), spacer, row(7, 7, 0, 0)),
-      row(0, 0, 1, 0, text("Toby"), spacer, row(7, 7, 0, 0)));
+      row(0, 0, 1, 0, text("Hello"), minSpace(10), radioButton()),
+      row(0, 0, 1, 0, text("World"), minSpace(10), radioButton()),
+      row(0, 0, 1, 0, text("My"), minSpace(10), radioButton()),
+      row(0, 0, 1, 0, text("Name is"), minSpace(10), radioButton()),
+      row(0, 0, 1, 0, text("Toby"), minSpace(10), radioButton()));
     auto lay = row(0, 0, 1, 1,
       sidebar,
       col(0, 0, 1, 1,
@@ -1056,7 +1112,13 @@ void resize(u32 width, u32 height) {
     Dimension y {lay, height, Y};
 
     for (u32 i: range(len(lay))) {
-      drawRect(x.pos[i], y.pos[i], x.size[i], y.size[i], grayu8(i * 137));
+      if (lay[i].user) {
+        Renderable* r = (Renderable*) lay[i].user;
+        r->draw(x.pos[i], y.pos[i], x.size[i], y.size[i]);
+        delete r;
+      } else {
+        drawRect(x.pos[i], y.pos[i], x.size[i], y.size[i], grayu8(i * 137));
+      }
     }
   }
 
