@@ -528,22 +528,24 @@ auto column(T&&... kids) {
 
 enum Direction: u8 { X, Y };
 
-constexpr u32 GROW = u32(-1);
-
 struct LayoutEntry {
   u32 min[2];
-  u32 max[2];
+  u32 pref[2];
+  bool grow[2];
+
   u16 childGap;
   u16 pad[4];  // [Direction][Side]
   u32 kids;
+
   Direction direction;  // meaningless if `!kids`
+
   void* user;
 };
 
-constexpr LayoutEntry spacer {.max = {GROW, GROW}};
+constexpr LayoutEntry spacer {.grow = {1, 1}};
 
 LayoutEntry minSpace(u32 minSize) {
-  return {.min = {minSize, minSize}, .max= {GROW, GROW}};
+  return {.min = {minSize, minSize}, .grow= {1, 1}};
 }
 
 u32 totalPad(LayoutEntry const& n, Direction d) {
@@ -587,18 +589,32 @@ auto cat(S const& s, T const&... r) {
 
 template <class... T>
 auto col(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, {growx ? GROW : minx, growy ? GROW : miny}, 0, {}, sizeof...(T), Y}, kids...);
+  return cat(LayoutEntry {
+    .min={minx, miny},
+    .grow={growx, growy},
+    .kids=sizeof...(T),
+    .direction=Y}, kids...);
 }
 
 template <class... T>
 auto colGap(
     u32 minx, u32 miny, bool growx, bool growy, u16 pad, u16 childGap, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, {growx ? GROW : minx, growy ? GROW : miny}, childGap, {pad, pad, pad, pad}, sizeof...(T), Y}, kids...);
+  return cat(LayoutEntry {
+    .min={minx, miny},
+    .grow={growx, growy},
+    .childGap=childGap,
+    .pad={pad, pad, pad, pad},
+    .kids=sizeof...(T),
+    .direction=Y}, kids...);
 }
 
 template <class... T>
 auto row(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, {growx ? GROW : minx, growy ? GROW : miny}, 0, {}, sizeof...(T), X}, kids...);
+  return cat(LayoutEntry {
+    .min={minx, miny},
+    .grow={growx, growy},
+    .kids=sizeof...(T),
+    .direction=X}, kids...);
 }
 
 struct Renderable {
@@ -671,11 +687,11 @@ auto text(char const (&x)[N]) {
 
   u32 minWidth = 6 * maxWordLen - 1;
   u32 maxWidth = 6 * len - 1;
-  return cat(LayoutEntry {{minWidth, 7}, {maxWidth, 7}, 0, {5, 5, 5, 5}, 0, X, new TextNode(Ref(x, len))});
+  return cat(LayoutEntry {.min={minWidth, 7}, .pref={maxWidth, 7}, .user=new TextNode(Ref(x, len))});
 }
 
 auto radioButton() {
-  return LayoutEntry {{14, 14}, {14, 14}, 0, {}, 0, X, new RadioNode};
+  return LayoutEntry {.min={14, 14}, .pref={14, 14}, .user=new RadioNode};
 }
 
 template <class T>
@@ -703,6 +719,31 @@ static GrowthDistribution growth_distribution(
   return {n, budget};
 }
 
+struct ShrinkCheckpoint {
+  u32 id;
+  u32 size;
+  bool min;
+};
+
+static GrowthDistribution shrink_distribution(
+    Span<ShrinkCheckpoint> checkpoints, Ref<bool> frozen, u32 deficit) {
+  u32 n = 0;
+  i32 budget = -i32(deficit);
+  for (auto [id, size, min]: checkpoints) {
+    if (n && i32(size) <= budget / i32(n))
+      return {n, u32(budget)};
+    if (min) {
+      frozen[id] = 1;
+      budget -= size;
+      --n;
+    } else {
+      budget += size;
+      ++n;
+    }
+  }
+  return {n, u32(budget)};
+}
+
 template <class T>
 void reverse(Ref<T> ref) {
   if (!ref)
@@ -716,6 +757,14 @@ void reverse(Ref<T> ref) {
   }
 }
 
+void reverse(ArrayList<u32>& x) {
+  reverse<u32>(x.list);
+  reverse<u32>(x.ofs);
+  u32 end = len(x.list);
+  for (u32& ofs: x.ofs)
+    ofs = end - ofs;
+}
+
 struct Dimension {
   Array<u32> size;
   Array<u32> pos;
@@ -724,89 +773,90 @@ struct Dimension {
     Span<LayoutEntry> node, u32 available, Direction d) {
     u32 n = len(node);
 
+    // bottom-up pass
     ArrayList<u32> node_growable_kids;
-    {
-      List<u32> stack;
-      List<u32> since;
-      for (u32 i = n; i--;) {
-        u32 n_since = len(since);
-        since.push(len(stack));
-        u32 n_kids = node[i].kids;
-        u32 since_i = since[n_since - n_kids];
-        since.size -= n_kids;
-        node_growable_kids.push(slice(stack, since_i));
-        stack.size = since_i;
-        if (node[i].max[d] > node[i].min[d])
-          stack.push(i);
-      }
-    }
-
-    {
-      reverse<u32>(node_growable_kids.list);
-      reverse<u32>(node_growable_kids.ofs);
-      u32 end = len(node_growable_kids.list);
-      for (u32& ofs: node_growable_kids.ofs)
-        ofs = end - ofs;
-    }
-
-    // bottom-up: compute minimum size
-    //   just add up children
-    struct MinMax {
-      u32 min, max;
-    };
-    List<MinMax> stack;
+    ArrayList<u32> nodeKids;
+    ArrayList<u32> nodeShrinkableKids;
     size = Array<u32>(n);
-    Array<u32> maxSize(n);
-    for (u32 i = n; i--;) {
-      auto& o = node[i];
-      u32 n_kids = o.kids;
-      auto pad = totalPad(o, d);
-      u32 total;
-      u32 totMax;
-      if (!n_kids) {
-        total = o.min[d];
-        totMax = o.max[d];
-      } else if (o.direction == d) {
-        u32 minSum = 0;
-        u32 maxSum = 0;
-        for (u32 j = 0; j < n_kids; ++j) {
-          auto& top = stack.last();
-          minSum += top.min;
-          if (maxSum == GROW || top.max == GROW)
-            maxSum = GROW;
-          else
-            maxSum += top.max;
-          stack.pop();
+    Array<u32> minSize(n);
+    {
+      struct MinMax {
+        u32 min;
+        u32 pref;
+      };
+      List<MinMax> stack;
+      List<u32> growable;
+      List<u32> shrinkable;
+      List<u32> all;
+      struct Since { u32 growable, shrinkable; };
+      List<Since> since;
+
+      for (u32 i = n; i--;) {
+        auto& o = node[i];
+        auto n_kids = o.kids;
+
+        // Index growable and shrinkable children
+        auto n_since = len(since);
+        since.push({len(growable), len(shrinkable)});
+        auto since_i = since[n_since - n_kids];
+        since.size -= n_kids;
+        node_growable_kids.push(slice(growable, since_i.growable));
+        nodeShrinkableKids.push(slice(shrinkable, since_i.shrinkable));
+        nodeKids.push(slice(all, len(all) - n_kids));
+        all.size -= n_kids;
+        growable.size = since_i.growable;
+        shrinkable.size = since_i.shrinkable;
+        if (o.grow[d])
+          growable.push(i);
+
+        auto pad = totalPad(o, d);
+        u32 totMin;
+        u32 totPref;
+        if (!n_kids) {
+          totMin = o.min[d];
+          totPref = o.pref[d];
+        } else if (o.direction == d) {
+          u32 minSum = 0;
+          u32 preSum = 0;
+          for (u32 j = 0; j < n_kids; ++j) {
+            auto& top = stack.last();
+            minSum += top.min;
+            preSum += top.pref;
+            stack.pop();
+          }
+          u32 totPad = pad + o.childGap * (n_kids - 1);
+          totMin = minSum + totPad;
+          totPref = preSum + totPad;
+        } else {
+          u32 minMax = 0;
+          u32 preMax = 0;
+          for (u32 j = 0; j < n_kids; ++j) {
+            auto& top = stack.last();
+            if (top.min > minMax)
+              minMax = top.min;
+            if (top.pref > preMax)
+              preMax = top.pref;
+            stack.pop();
+          }
+          totMin = minMax + pad;
+          totPref = preMax + pad;
         }
-        u32 totPad = pad + o.childGap * (n_kids - 1);
-        total = minSum + totPad;
-        totMax = maxSum == GROW ? GROW : maxSum + totPad;
-      } else {
-        u32 max = 0;
-        u32 maxMax = 0;
-        for (u32 j = 0; j < n_kids; ++j) {
-          auto& top = stack.last();
-          if (top.min > max)
-            max = top.min;
-          if (top.max > maxMax)
-            maxMax = top.max;
-          stack.pop();
-        }
-        total = max + pad;
-        totMax = maxMax == GROW ? GROW : maxMax + pad; 
+        if (totPref < totMin)
+          totPref = totMin;
+        size[i] = totPref;
+        minSize[i] = totMin;
+        if (totMin < totPref)
+          shrinkable.push(i);
+        all.push(i);
+        auto& top = stack.push({totMin, totPref});
       }
-      if (o.max[d] > totMax)
-        totMax = o.max[d];
-      size[i] = total;
-      maxSize[i] = totMax;
-      auto& top = stack.push({total, totMax});
+
+      check(len(stack) == 1);
     }
 
-    check(len(stack) == 1);
-    if (maxSize[0] <= size[0])
-      return;
-    dump(size.span());
-    dump(maxSize.span());
+    reverse(node_growable_kids);
+    reverse(nodeShrinkableKids);
+    reverse(nodeKids);
 
     auto orig_size = size;
 
@@ -814,31 +864,56 @@ struct Dimension {
     //   distribute extra space to growable children
     size[0] = available;
     for (u32 i = 0; i < n; ++i) {
-      // node is growable in the current dimension
       u32 avail = size[i];
-      check(avail >= orig_size[i]);  // TODO
-      u32 amount = avail - orig_size[i];
 
-      if (node[i].direction == d) {  // longitudinal
-
-        // now, want to get all growable kids
-        // want to sort by current size
-        // go up from bottom
-        auto gkids = node_growable_kids[i];
-        sort(gkids, [this](u32 k0, u32 k1) { return size[k0] < size[k1]; });
-
-        auto gdist = growth_distribution(size, gkids, amount);
+      if (node[i].direction != d) {  // across
+        u32 innerSpace = avail - totalPad(node[i], d);
+        for (u32 k: nodeKids[i]) {
+          check(innerSpace >= minSize[k]);
+          if (innerSpace <= size[k] || node[k].grow[d]) {
+            size[k] = innerSpace;
+          }
+        }
+        continue;
+      }
+      if (avail > orig_size[i] && node[i].grow[d]) {  // if grow
+        u32 amount = avail - orig_size[i];
+        auto kids = node_growable_kids[i];
+        sort(kids, [this](u32 a, u32 b) { return size[a] < size[b]; });
+        auto gdist = growth_distribution(size, kids, amount);
         for (u32 j: range(gdist.how_many_kids_can_we_grow)) {
           u32 size_j = gdist.to_what_total_size / (gdist.how_many_kids_can_we_grow - j);
-          size[gkids[j]] = size_j;
+          size[kids[j]] = size_j;
           gdist.to_what_total_size -= size_j;
         }
+      } else if (avail < orig_size[i]) {  // if shrink
+        u32 amount = orig_size[i] - avail;
+        auto kids = nodeShrinkableKids[i];
 
-      } else {  // transverse
-        u32 innerSpace = avail - totalPad(node[i], d);
-        // get all growable children, grow them to this size
-        for (u32 k: node_growable_kids[i])
-          size[k] = innerSpace;
+        sort(kids, [this](u32 a, u32 b) { return size[a] > size[b]; });
+        auto nk = len(kids);
+        Array<ShrinkCheckpoint> sc(nk * 2);
+        Array<bool> frozen(nk);
+        for (u32 j: range(nk)) {
+          sc[2 * j] = {j, size[kids[j]]};
+          sc[2 * j + 1] = {j, minSize[kids[j]], 1};
+        }
+
+        sort(sc.mut(), [this](auto& a, auto& b) { return a.size > b.size; });
+        auto dist = shrink_distribution(sc, frozen, amount);
+        for (u32 j = 0; j < nk; ++j) {
+          if (frozen[j]) {
+            size[kids[j]] = minSize[kids[j]];
+          } else if (!dist.how_many_kids_can_we_grow) {
+            break;
+          } else {
+            u32 size_j = dist.to_what_total_size / dist.how_many_kids_can_we_grow;
+            size[kids[j]] = size_j;
+            dist.to_what_total_size -= size_j;
+            --dist.how_many_kids_can_we_grow;
+          }
+        }
+        check(!dist.how_many_kids_can_we_grow);
       }
     }
 
