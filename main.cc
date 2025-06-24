@@ -18,6 +18,7 @@ void redraw();
 u32 getUniformBlock(u32 program, char const* name, u32 len);
 u32 bindUniformBlock(u32 program, u32 block, u32 binding);
 u32 makeBuffer(u32 size);
+void dropBuffer(u32 buffer);
 void bindUniformBuffer(u32 binding, u32 buffer);
 void fillBuffer(u32 buffer, u32 ofs, void const* src, u32 size);
 void make_texture(void const* data, u32 size);
@@ -29,10 +30,10 @@ void vertexAttrib2f(u32 attrib, f32, f32);
 void vertexAttrib3f(u32 attrib, f32, f32, f32);
 void vertexAttrib4f(u32 attrib, f32, f32, f32, f32);
 void vertexAttributeArrayU8(
-  u32 attrib, u32 buffer, u32 components, bool normalized, u8 stride,
+  u32 attrib, u32 buffer, u32 components, u8 stride,
   u32 offset, u32 instanceDivisor);
 void vertexAttributeArrayI16(
-  u32 attrib, u32 buffer, u32 components, bool normalized, u8 stride,
+  u32 attrib, u32 buffer, u32 components, u8 stride,
   u32 offset, u32 instanceDivisor);
 void enableBlend();
 void disableBlend();
@@ -226,6 +227,9 @@ GlMat3 rot_y(GlMat3 R0, f32 th) {
 
 void make_text_program() {
   u32 v_multiline = make_vertex_shader(R"gl(#version 300 es
+uniform Position {
+  ivec2 uPos;
+};
 uniform Resolution {
   vec2 uResolution;
 };
@@ -239,8 +243,8 @@ void main() {
   float glyphStride = 6.0;
   vec2 charSize = glyphSize * 2.0 / uResolution;
   vCoord = vec2(float(gl_VertexID / 2), float(gl_VertexID % 2));
-  vec2 coord = (-1.0 + 20.0 / uResolution) + vCoord * charSize;
-  vec2 shift = vec2(aColRow * ivec2(6, 8) * 2) / uResolution;
+  vec2 coord = vec2(-1, 1) + vCoord * charSize;
+  vec2 shift = vec2((aColRow * ivec2(6, 8) + uPos) * ivec2(2, -2)) / uResolution;
   gl_Position = vec4(shift + coord, 0, 1);
 }
   )gl"_s);
@@ -358,8 +362,8 @@ struct MultiLineString {
   u32 size {};
   MultiLineString() {
     va.bind();
-    vertexAttributeArrayU8(0, stringBuffer, 1, 0, 0, 0, 1);
-    vertexAttributeArrayI16(1, colRowBuffer, 2, 0, 0, 0, 1);
+    vertexAttributeArrayU8(0, stringBuffer, 1, 0, 0, 1);
+    vertexAttributeArrayI16(1, colRowBuffer, 2, 0, 0, 1);
   }
   void set(Str string) {
     size = len(string);
@@ -391,17 +395,20 @@ struct MultiLineString {
   }
 };
 
-void drawText(Str text, u32 x, u32 y) {
+void drawText(Str text, u32 x, u32 y, i16 (*colRow)[2]) {
+  static_assert(is_trivially_copyable<u32[2]>);
   u32 size = len(text);
   VertexArray va {};
-  u32 buf = makeBuffer(size);
+  u32 buf = makeBuffer(size * 5);
+  useProgram(multiLineTextProgram);
   va.bind();
-  vertexAttributeArrayU8(0, buf, 1, 0, 0, 0, 1);
-  fillBuffer(buf, 0, text.begin(), size);
-  useProgram(textProgram);
+  vertexAttributeArrayU8(0, buf, 1, 0, size * 4, 1);
+  vertexAttributeArrayI16(1, buf, 2, 0, 0, 1);
+  fillBuffer(buf, 0, colRow, size * 4);
+  fillBuffer(buf, size * 4, text.begin(), size);
   fillBuffer(textPositionBuffer, 0, (u32[]) {x, y + 7}, 8);
   drawTriangleStripInstanced(0, 4, size);
-  // TODO: dropBuffer(buf);
+  dropBuffer(buf);
 }
 
 template <class T>
@@ -521,20 +528,22 @@ auto column(T&&... kids) {
 
 enum Direction: u8 { X, Y };
 
+constexpr u32 GROW = u32(-1);
+
 struct LayoutEntry {
   u32 min[2];
+  u32 max[2];
   u16 childGap;
   u16 pad[4];  // [Direction][Side]
-  bool grow[2];
   u32 kids;
   Direction direction;  // meaningless if `!kids`
   void* user;
 };
 
-constexpr LayoutEntry spacer {.grow = {1, 1}};
+constexpr LayoutEntry spacer {.max = {GROW, GROW}};
 
 LayoutEntry minSpace(u32 minSize) {
-  return {.min = {minSize, minSize}, .grow = {1, 1}};
+  return {.min = {minSize, minSize}, .max= {GROW, GROW}};
 }
 
 u32 totalPad(LayoutEntry const& n, Direction d) {
@@ -578,18 +587,18 @@ auto cat(S const& s, T const&... r) {
 
 template <class... T>
 auto col(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, 0, {}, {growx, growy}, sizeof...(T), Y}, kids...);
+  return cat(LayoutEntry {{minx, miny}, {growx ? GROW : minx, growy ? GROW : miny}, 0, {}, sizeof...(T), Y}, kids...);
 }
 
 template <class... T>
 auto colGap(
     u32 minx, u32 miny, bool growx, bool growy, u16 pad, u16 childGap, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, childGap, {pad, pad, pad, pad}, {growx, growy}, sizeof...(T), Y}, kids...);
+  return cat(LayoutEntry {{minx, miny}, {growx ? GROW : minx, growy ? GROW : miny}, childGap, {pad, pad, pad, pad}, sizeof...(T), Y}, kids...);
 }
 
 template <class... T>
 auto row(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
-  return cat(LayoutEntry {{minx, miny}, 0, {}, {growx, growy}, sizeof...(T), X}, kids...);
+  return cat(LayoutEntry {{minx, miny}, {growx ? GROW : minx, growy ? GROW : miny}, 0, {}, sizeof...(T), X}, kids...);
 }
 
 struct Renderable {
@@ -608,12 +617,37 @@ struct RadioNode: Renderable {
 };
 
 struct TextNode: Renderable {
-  String text;
-  TextNode(String x): text(move(x)) {}
+  String value;
+  TextNode(String x): value(move(x)) {}
   void draw(i32 x, i32 y, u32 dx, u32 dy) override {
     (void) dx;
     (void) dy;
-    drawText(text, x, y);
+
+    u32 maxCols = (dx + 1) / 6;
+
+    // layout text
+    u32 size = len(value);
+    Array<i16[2]> colRow(len(value));
+    i16 row = 0;
+    i16 col = 0;
+    u32 lastStart = 0;
+    bool madeProgress = 0;
+    for (u32 i = 0; i < size; ++i) {
+      if (value[i] == ' ') {
+        madeProgress = 1;
+        lastStart = i + 1;
+      } else if (col >= maxCols) {
+        check(madeProgress);
+        i = lastStart;
+        madeProgress = 0;
+        ++row;
+        col = 0;
+      }
+      colRow[i][0] = col++;
+      colRow[i][1] = row;
+    }
+
+    drawText(value, x, y, colRow.begin());
   }
 };
 
@@ -621,37 +655,28 @@ template <u32 N>
 auto text(char const (&x)[N]) {
   u32 len = N - 1;
   check(!x[len]);
-  return cat(LayoutEntry {{6 * len - 1, 7}, 0, {}, {0, 0}, 0, X, new TextNode(Ref(x, len))});
+
+  u32 maxWordLen = 0;
+  u32 wordStart = 0;
+  for (u32 i = 0; i < len; ++i) {
+    if (x[i] == ' ') {
+      u32 wordLen = i - wordStart;
+      wordStart = i + 1;
+      if (wordLen > maxWordLen)
+        maxWordLen = wordLen;
+    }
+  }
+  if (len - wordStart > maxWordLen)
+    maxWordLen = len - wordStart;
+
+  u32 minWidth = 6 * maxWordLen - 1;
+  u32 maxWidth = 6 * len - 1;
+  return cat(LayoutEntry {{minWidth, 7}, {maxWidth, 7}, 0, {5, 5, 5, 5}, 0, X, new TextNode(Ref(x, len))});
 }
 
 auto radioButton() {
-  return LayoutEntry {{14, 14}, 0, {}, {0, 0}, 0, X, new RadioNode};
+  return LayoutEntry {{14, 14}, {14, 14}, 0, {}, 0, X, new RadioNode};
 }
-
-struct Kids {
-  Array<u32> kids;
-  Array<u32> end;
-  Kids(Span<LayoutEntry> node) {
-    u32 n = len(node);
-    kids = Array<u32>(n);
-    u32 n_out = 0;
-    u32 n_end = 0;
-    List<u32> stack;
-    for (u32 i = 0; i < n; ++i) {
-      u32 n_kids = node[i].kids;
-      for (u32 i = n_kids; i; --i)
-        kids[n_out++] = stack[stack.size - i];
-      stack.size -= n_kids;
-      end[i] = n_out;
-      stack.push(i);
-    }
-    check(n_out == n);
-  }
-  Ref<u32> operator[](u32 i) {
-    u32 begin = i ? end[i - 1] : 0;
-    return {kids.begin() + begin, end[i] - begin};
-  }
-};
 
 template <class T>
 Span<T> slice(List<T> const& x, u32 base) {
@@ -711,7 +736,7 @@ struct Dimension {
         since.size -= n_kids;
         node_growable_kids.push(slice(stack, since_i));
         stack.size = since_i;
-        if (node[i].grow[d])
+        if (node[i].max[d] > node[i].min[d])
           stack.push(i);
       }
     }
@@ -726,40 +751,62 @@ struct Dimension {
 
     // bottom-up: compute minimum size
     //   just add up children
-    List<u32> stack;
+    struct MinMax {
+      u32 min, max;
+    };
+    List<MinMax> stack;
     size = Array<u32>(n);
+    Array<u32> maxSize(n);
     for (u32 i = n; i--;) {
       auto& o = node[i];
       u32 n_kids = o.kids;
       auto pad = totalPad(o, d);
       u32 total;
+      u32 totMax;
       if (!n_kids) {
         total = o.min[d];
+        totMax = o.max[d];
       } else if (o.direction == d) {
-        u32 sum = 0;
+        u32 minSum = 0;
+        u32 maxSum = 0;
         for (u32 j = 0; j < n_kids; ++j) {
-          sum += stack.last();
+          auto& top = stack.last();
+          minSum += top.min;
+          if (maxSum == GROW || top.max == GROW)
+            maxSum = GROW;
+          else
+            maxSum += top.max;
           stack.pop();
         }
-        total = sum + pad + o.childGap * (n_kids - 1);
+        u32 totPad = pad + o.childGap * (n_kids - 1);
+        total = minSum + totPad;
+        totMax = maxSum == GROW ? GROW : maxSum + totPad;
       } else {
         u32 max = 0;
+        u32 maxMax = 0;
         for (u32 j = 0; j < n_kids; ++j) {
-          if (stack.last() > max)
-            max = stack.last();
+          auto& top = stack.last();
+          if (top.min > max)
+            max = top.min;
+          if (top.max > maxMax)
+            maxMax = top.max;
           stack.pop();
         }
         total = max + pad;
+        totMax = maxMax == GROW ? GROW : maxMax + pad; 
       }
+      if (o.max[d] > totMax)
+        totMax = o.max[d];
       size[i] = total;
-      stack.push(total);
+      maxSize[i] = totMax;
+      auto& top = stack.push({total, totMax});
     }
 
     check(len(stack) == 1);
-    u32 total = stack.last();
-
-    if (!node[0].grow[d])
+    if (maxSize[0] <= size[0])
       return;
+    dump(size.span());
+    dump(maxSize.span());
 
     auto orig_size = size;
 
@@ -1062,8 +1109,8 @@ void main() {
 
   textPositionBuffer = makeBuffer(8);
   bindUniformBuffer(3, textPositionBuffer);
-  u32 textPosition = getUniformBlock(textProgram, "Position");
-  bindUniformBlock(textProgram, textPosition, 3);
+  u32 textPosition = getUniformBlock(multiLineTextProgram, "Position");
+  bindUniformBlock(multiLineTextProgram, textPosition, 3);
 }
 
 void scroll(f32 x, f32 y, f32 dx, f32 dy) {
@@ -1096,6 +1143,8 @@ void resize(u32 width, u32 height) {
       row(0, 0, 1, 0, text("My"), minSpace(10), radioButton()),
       row(0, 0, 1, 0, text("Name is"), minSpace(10), radioButton()),
       row(0, 0, 1, 0, text("Toby"), minSpace(10), radioButton()));
+    auto lipsum = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
+    auto lipsum2 = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
     auto lay = row(0, 0, 1, 1,
       sidebar,
       col(0, 0, 1, 1,
@@ -1105,7 +1154,7 @@ void resize(u32 width, u32 height) {
           row(200, 40, 1, 0),  // left tab
           row(200, 40, 1, 0)  // right tab
         ),
-        row(0, 0, 1, 1, menu)  // main content
+        row(0, 0, 1, 1, menu, lipsum, lipsum2)  // main content
       ));
 
     Dimension x {lay, width, X};

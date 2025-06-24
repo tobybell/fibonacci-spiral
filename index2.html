@@ -85,16 +85,16 @@ const env = {
   set_viewport(x, y, dx, dy) {
     gl.viewport(x, y, dx, dy);
   },
-  vertexAttributeArrayU8(attrib, buffer, components, normalized, stride, offset, instanceDivisor) {
+  vertexAttributeArrayU8(attrib, buffer, components, stride, offset, instanceDivisor) {
     gl.enableVertexAttribArray(attrib);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers[buffer]);
-    gl.vertexAttribIPointer(attrib, components, gl.UNSIGNED_BYTE, normalized, stride, offset);
+    gl.vertexAttribIPointer(attrib, components, gl.UNSIGNED_BYTE, stride, offset);
     gl.vertexAttribDivisor(attrib, instanceDivisor);
   },
-  vertexAttributeArrayI16(attrib, buffer, components, normalized, stride, offset, instanceDivisor) {
+  vertexAttributeArrayI16(attrib, buffer, components, stride, offset, instanceDivisor) {
     gl.enableVertexAttribArray(attrib);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers[buffer]);
-    gl.vertexAttribIPointer(attrib, components, gl.SHORT, normalized, stride, offset);
+    gl.vertexAttribIPointer(attrib, components, gl.SHORT, stride, offset);
     gl.vertexAttribDivisor(attrib, instanceDivisor);
   },
   make_program(ptr, len) {
@@ -142,6 +142,9 @@ const env = {
     gl.bufferData(gl.ARRAY_BUFFER, size, gl.DYNAMIC_DRAW);
     buffers.push(buffer);
     return id;
+  },
+  dropBuffer(buffer) {
+    gl.deleteBuffer(buffers[buffer]);
   },
   bindUniformBuffer(index, buffer) {
     gl.bindBufferBase(gl.UNIFORM_BUFFER, index, buffers[buffer]);

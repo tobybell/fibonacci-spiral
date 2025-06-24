@@ -86,6 +86,9 @@ constexpr void swap(T& x, T& y) {
 #define check(x) if (!(x)) { console_log(#x, sizeof(#x)); abort(); }
 
 template <class T>
+constexpr bool is_trivially_copyable = __is_trivially_copyable(T);
+
+template <class T>
 constexpr bool is_trivial = __is_trivial(T);
 
 template <class T, class... S>
@@ -526,7 +529,7 @@ struct List {
       while (capacity < needed)
         capacity *= 2;
     
-    if constexpr (is_trivially_constructible<T, T const&>) {
+    if constexpr (is_trivially_copyable<T>) {
       data = reinterpret_cast<T*>(realloc(data, capacity * sizeof(T)));
     } else {
       T* new_data = reinterpret_cast<T*>(malloc(capacity * sizeof(T)));
@@ -800,9 +803,6 @@ private:
 };
 
 #define dump(x) println(#x, ": ", x)
-
-template <class T>
-constexpr bool is_trivially_copyable = __is_trivially_copyable(T);
 
 template <class T, class... S>
 using ReturnType = decltype(declval<T>()(declval<S>()...));
