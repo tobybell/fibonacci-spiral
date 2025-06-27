@@ -193,7 +193,7 @@ WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
     exports.draw();
   };
   ctx.draw = draw;
-  draw();
+  //draw();
 
   canvas.addEventListener('wheel', e => {
     exports.scroll(0, 0, e.deltaX, e.deltaY);

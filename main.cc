@@ -490,42 +490,6 @@ struct Work {
   }
 };
 
-struct Node {
-  u32 x, y, width, height;
-  virtual void layout() = 0;
-  virtual void draw() = 0;
-};
-
-struct Column: Node {
-  List<Node*> kids;
-  void layout() override {
-    u32 y = 0;
-    u32 x = 0;
-    for (auto kid_ptr: kids) {
-      auto& kid = *kid_ptr;
-      kid.layout();
-      kid.x = 0;
-      kid.y = y;
-      y += kid.height;
-      if (kid.width > x)
-        x = kid.width;
-    }
-    height = y;
-    width = x;
-  }
-  void draw() override {
-    for (auto kid: kids)
-      kid->draw();
-  }
-};
-
-template <class... T>
-auto column(T&&... kids) {
-  auto p = new Column;
-  (p->kids.push(kids), ...);
-  return p;
-}
-
 enum Direction: u8 { X, Y };
 
 struct LayoutEntry {
@@ -535,8 +499,8 @@ struct LayoutEntry {
 
   u16 childGap;
   u16 pad[4];  // [Direction][Side]
-  u32 kids;
 
+  u32 kids;
   Direction direction;  // meaningless if `!kids`
 
   void* user;
@@ -688,7 +652,39 @@ auto text(char const (&x)[N]) {
   u32 minWidth = 6 * maxWordLen - 1;
   u32 maxWidth = 6 * len - 1;
   return cat(LayoutEntry {.min={minWidth, 7}, .pref={maxWidth, 7}, .user=new TextNode(Ref(x, len))});
+
+  // add child to container... need to bubble up: layout child, layout parent,
+  // layout parent, layout parent, etc. for each parent that changed, bubble
+  // down width sizing.
+  //
+  // I don't think anything should be able to have children added to it.
+  // You should be able to say, here is my tree; this is it.
+  //
+  // An app container, you pass properties to it, and you pass children to it.
+  // What is children? Children should be able to say, add node, remove node,
+  // re-order nodes.
+  //
+  // Object in memory should stay in place, but references to such nodes can be
+  // re-ordered easily.
+  //
+  // Is there such a thing as an object not currently in the hierarchy? I think so, yes.
+  // If it's not in the hierarchy, it should not be drawn. Eh... maybe this
+  // means that removing it from the hierarchy should simply destroy whatever
+  // object represents its existence in the hierarchy.
+  //
+  // So... such a "mounting" object would be given some content, and a mount
+  // point or parent layout node.
 }
+
+struct Mount {
+  LayoutEntry lay;
+  virtual ~Mount() = default;
+};
+
+struct ContainerMount: Mount {
+  List<Mount> kids;
+  ~ContainerMount() override = default;
+};
 
 auto radioButton() {
   return LayoutEntry {.min={14, 14}, .pref={14, 14}, .user=new RadioNode};
@@ -768,6 +764,8 @@ void reverse(ArrayList<u32>& x) {
 struct Dimension {
   Array<u32> size;
   Array<u32> pos;
+
+  Dimension() = default;
 
   Dimension(
     Span<LayoutEntry> node, u32 available, Direction d) {
@@ -863,6 +861,17 @@ struct Dimension {
     // top-down: compute actual size (based on available)
     //   distribute extra space to growable children
     size[0] = available;
+
+    struct PosContext {
+      u32 value;
+      u32 count;
+      u16 childGap;
+      bool increment;
+    };
+    List<PosContext> pstack;
+    pstack.push({0, 1, 0, 0});
+    pos = Array<u32>(n);
+
     for (u32 i = 0; i < n; ++i) {
       u32 avail = size[i];
 
@@ -874,9 +883,7 @@ struct Dimension {
             size[k] = innerSpace;
           }
         }
-        continue;
-      }
-      if (avail > orig_size[i] && node[i].grow[d]) {  // if grow
+      } else if (avail > orig_size[i] && node[i].grow[d]) {  // if grow
         u32 amount = avail - orig_size[i];
         auto kids = node_growable_kids[i];
         sort(kids, [this](u32 a, u32 b) { return size[a] < size[b]; });
@@ -901,6 +908,10 @@ struct Dimension {
 
         sort(sc.mut(), [this](auto& a, auto& b) { return a.size > b.size; });
         auto dist = shrink_distribution(sc, frozen, amount);
+
+        // loop over...
+        // if see preferred size, start shrinking that kid
+        // if see 
         for (u32 j = 0; j < nk; ++j) {
           if (frozen[j]) {
             size[kids[j]] = minSize[kids[j]];
@@ -915,18 +926,7 @@ struct Dimension {
         }
         check(!dist.how_many_kids_can_we_grow);
       }
-    }
 
-    struct PosContext {
-      u32 value;
-      u32 count;
-      u16 childGap;
-      bool increment;
-    };
-    List<PosContext> pstack;
-    pstack.push({0, 1, 0, 0});
-    pos = Array<u32>(n);
-    for (u32 i = 0; i < n; ++i) {
       auto& top = pstack.last();
       pos[i] = top.value;
       --top.count;
@@ -940,17 +940,6 @@ struct Dimension {
       if (n_kids)
         pstack.push({pos[i] + node[i].pad[2 * d], n_kids, node[i].childGap, node[i].direction == d});
     }
-  }
-};
-
-struct RadioButton: Node {
-  void layout() override {
-    height = width = 14;
-  }
-  void draw() override {
-    u32 cx = x + 7;
-    u32 cy = y + 7;
-    enabledRadioButton(-1 + f32(cx) * 2 / gWidth, 1 - f32(cy) * 2 / gHeight);
   }
 };
 
@@ -977,13 +966,38 @@ struct App {
   State<bool> onoff;
   Work cleanup;
 
-  Column* c = column(new RadioButton, new RadioButton);
+  Array<LayoutEntry> lay;
+  Dimension x;
+  Dimension y;
 
   App() {
-    c->layout();
-
     //auto cmp = radio_button(onoff);
     //cleanup = cmp();
+
+    auto sidebar = col(200, 0, 0, 1);
+    auto title_bar = row(0, 0, 1, 0,
+        row(200, 0, 1, 1),  // left spacer
+        row(400, 30, 0, 0), // title
+        spacer);  // right spacer
+    auto menu = colGap(0, 0, 0, 0, 5, 5,
+      row(0, 0, 1, 0, text("Hello"), minSpace(10), radioButton()),
+      row(0, 0, 1, 0, text("World"), minSpace(10), radioButton()),
+      row(0, 0, 1, 0, text("My"), minSpace(10), radioButton()),
+      row(0, 0, 1, 0, text("Name is"), minSpace(10), radioButton()),
+      row(0, 0, 1, 0, text("Toby"), minSpace(10), radioButton()));
+    auto lipsum = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
+    auto lipsum2 = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
+    lay = row(0, 0, 1, 1,
+      sidebar,
+      col(0, 0, 1, 1,
+        title_bar,
+        // tab bar
+        row(0, 0, 1, 0,
+          row(200, 40, 1, 0),  // left tab
+          row(200, 40, 1, 0)  // right tab
+        ),
+        row(0, 0, 1, 1, menu, lipsum, lipsum2)  // main content
+      ));
   }
 
   ~App() {
@@ -1012,8 +1026,21 @@ struct App {
     }
   }
 
+  void resize(u32 w, u32 h) {
+    x = Dimension {lay, w, X};
+    y = Dimension {lay, h, Y};
+  }
+
   void draw() {
-    c->draw();
+    for (u32 i: range(len(lay))) {
+      if (lay[i].user) {
+        Renderable* r = (Renderable*) lay[i].user;
+        r->draw(x.pos[i], y.pos[i], x.size[i], y.size[i]);
+      } else {
+        drawRect(x.pos[i], y.pos[i], x.size[i], y.size[i], grayu8(i * 137));
+      }
+    }
+
     str.draw();
   }
 };
@@ -1206,46 +1233,7 @@ void resize(u32 width, u32 height) {
   fillBuffer(uResolutionBuffer, 8, (f32[]) {2 / f32(width), 2 / f32(height)}, 8);
   set_viewport(0, 0, width, height);
 
-  {
-    auto sidebar = col(200, 0, 0, 1);
-    auto title_bar = row(0, 0, 1, 0,
-        row(200, 0, 1, 1),  // left spacer
-        row(400, 30, 0, 0), // title
-        spacer);  // right spacer
-    auto menu = colGap(0, 0, 0, 0, 5, 5,
-      row(0, 0, 1, 0, text("Hello"), minSpace(10), radioButton()),
-      row(0, 0, 1, 0, text("World"), minSpace(10), radioButton()),
-      row(0, 0, 1, 0, text("My"), minSpace(10), radioButton()),
-      row(0, 0, 1, 0, text("Name is"), minSpace(10), radioButton()),
-      row(0, 0, 1, 0, text("Toby"), minSpace(10), radioButton()));
-    auto lipsum = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
-    auto lipsum2 = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
-    auto lay = row(0, 0, 1, 1,
-      sidebar,
-      col(0, 0, 1, 1,
-        title_bar,
-        // tab bar
-        row(0, 0, 1, 0,
-          row(200, 40, 1, 0),  // left tab
-          row(200, 40, 1, 0)  // right tab
-        ),
-        row(0, 0, 1, 1, menu, lipsum, lipsum2)  // main content
-      ));
-
-    Dimension x {lay, width, X};
-    Dimension y {lay, height, Y};
-
-    for (u32 i: range(len(lay))) {
-      if (lay[i].user) {
-        Renderable* r = (Renderable*) lay[i].user;
-        r->draw(x.pos[i], y.pos[i], x.size[i], y.size[i]);
-        delete r;
-      } else {
-        drawRect(x.pos[i], y.pos[i], x.size[i], y.size[i], grayu8(i * 137));
-      }
-    }
-  }
-
+  app->resize(width, height);
   app->draw();
 }
 
