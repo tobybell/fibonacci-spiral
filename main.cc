@@ -1,5 +1,5 @@
 #include "print.hh"
-#include "gui-simp.hh"
+#include "gui.hh"
 #include "sort.hh"
 
 using f32 = float;
@@ -63,89 +63,6 @@ void sort(Ref<T> elem, F&& cmp) {
 }
 
 }
-
-struct KeyMap {
-  Key map[256] {};
-  constexpr KeyMap() {
-    map[32] = Space;
-    map[222] = Apostrophe;
-    map[188] = Comma;
-    map[189] = Minus;
-    map[190] = Period;
-    map[191] = Slash;
-    map[48] = Key0;
-    map[49] = Key1;
-    map[50] = Key2;
-    map[51] = Key3;
-    map[52] = Key4;
-    map[53] = Key5;
-    map[54] = Key6;
-    map[55] = Key7;
-    map[56] = Key8;
-    map[57] = Key9;
-    map[186] = Semicolon;
-    map[187] = Equal;
-    map[65] = KeyA;
-    map[66] = KeyB;
-    map[67] = KeyC;
-    map[68] = KeyD;
-    map[69] = KeyE;
-    map[70] = KeyF;
-    map[71] = KeyG;
-    map[72] = KeyH;
-    map[73] = KeyI;
-    map[74] = KeyJ;
-    map[75] = KeyK;
-    map[76] = KeyL;
-    map[77] = KeyM;
-    map[78] = KeyN;
-    map[79] = KeyO;
-    map[80] = KeyP;
-    map[81] = KeyQ;
-    map[82] = KeyR;
-    map[83] = KeyS;
-    map[84] = KeyT;
-    map[85] = KeyU;
-    map[86] = KeyV;
-    map[87] = KeyW;
-    map[88] = KeyX;
-    map[89] = KeyY;
-    map[90] = KeyZ;
-    map[219] = LeftBracket;
-    map[220] = Backslash;
-    map[221] = RightBracket;
-    map[192] = GraveAccent;
-    map[27] = Escape;
-    map[13] = Enter;
-    map[9] = Tab;
-    map[8] = Backspace;
-    map[46] = Delete;
-    map[39] = Right;
-    map[37] = Left;
-    map[40] = Down;
-    map[38] = Up;
-    map[20] = CapsLock;
-    map[112] = F1;
-    map[113] = F2;
-    map[114] = F3;
-    map[115] = F4;
-    map[116] = F5;
-    map[117] = F6;
-    map[118] = F7;
-    map[119] = F8;
-    map[120] = F9;
-    map[121] = F10;
-    map[122] = F11;
-    map[123] = F12;
-    map[16] = Shift;
-    map[17] = Control;
-    map[18] = Alt;
-    map[91] = LeftSuper;
-    map[93] = RightSuper;
-  }
-};
-
-static constexpr KeyMap key_map {};
 
 void init_heap();
 
@@ -1006,6 +923,7 @@ struct App {
   }
 
   void key(Key key) {
+    dump(key);
     onoff = !onoff.value;
     if (key == Backspace) {
       if (string) {
@@ -1025,6 +943,7 @@ struct App {
         str.set(string);
       }
     }
+    redraw();
   }
 
   void resize(u32 w, u32 h) {
@@ -1223,7 +1142,7 @@ void scroll(f32 x, f32 y, f32 dx, f32 dy) {
 }
 
 void key(u32 id) {
-  app->key(key_map.map[id]);
+  app->key((Key) id);
 }
 
 f32 aspect = 1;

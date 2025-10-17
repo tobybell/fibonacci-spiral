@@ -12,6 +12,9 @@
 typedef unsigned u32;
 typedef float f32;
 typedef unsigned long uptr;
+typedef unsigned char u8;
+
+extern u8 const key_map[256];
 
 void app_start();
 void resize(u32 w, u32 h, u32 k);
@@ -133,7 +136,10 @@ Proc getProcAddressNSGL(const char* name) {
 }
 
 - (void)keyDown:(NSEvent*)event {
-  key([event keyCode]);
+  u32 code = event.keyCode;
+  if (code > sizeof(key_map) / sizeof(key_map[0]))
+    return;
+  key(key_map[code]);
 }
 
 - (void)keyUp:(NSEvent*)event {

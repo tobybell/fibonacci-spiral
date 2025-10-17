@@ -204,7 +204,7 @@ WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
   }, false);
 
   document.addEventListener('keydown', e => {
-    if (exports.key(e.keyCode))
+    if (exports.wasm_key(e.keyCode))
       e.preventDefault();
   }, false);
 

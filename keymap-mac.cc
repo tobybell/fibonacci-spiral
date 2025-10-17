@@ -1,0 +1,70 @@
+#include "gui.hh"
+
+struct KeyMap {
+  Key keys[256] {};
+  constexpr KeyMap() {
+    keys[51] = Backspace;
+    keys[48] = Tab;
+    keys[36] = Enter;
+    keys[56] = Shift;
+    keys[60] = Shift;
+    keys[58] = Alt;
+    keys[61] = Alt;
+    keys[57] = CapsLock;
+    keys[53] = Escape;
+    keys[49] = Space;
+    keys[123] = Left;
+    keys[126] = Up;
+    keys[124] = Right;
+    keys[125] = Down;
+    keys[29] = Key0;
+    keys[18] = Key1;
+    keys[19] = Key2;
+    keys[20] = Key3;
+    keys[21] = Key4;
+    keys[23] = Key5;
+    keys[22] = Key6;
+    keys[26] = Key7;
+    keys[28] = Key8;
+    keys[25] = Key9;
+    keys[0] = KeyA;
+    keys[11] = KeyB;
+    keys[8] = KeyC;
+    keys[2] = KeyD;
+    keys[14] = KeyE;
+    keys[3] = KeyF;
+    keys[5] = KeyG;
+    keys[4] = KeyH;
+    keys[34] = KeyI;
+    keys[38] = KeyJ;
+    keys[40] = KeyK;
+    keys[37] = KeyL;
+    keys[46] = KeyM;
+    keys[45] = KeyN;
+    keys[31] = KeyO;
+    keys[35] = KeyP;
+    keys[12] = KeyQ;
+    keys[15] = KeyR;
+    keys[1] = KeyS;
+    keys[17] = KeyT;
+    keys[32] = KeyU;
+    keys[9] = KeyV;
+    keys[13] = KeyW;
+    keys[7] = KeyX;
+    keys[16] = KeyY;
+    keys[6] = KeyZ;
+    keys[41] = Semicolon;
+    keys[24] = Equal;
+    keys[43] = Comma;
+    keys[27] = Minus;
+    keys[47] = Period;
+    keys[44] = Slash;
+    keys[50] = GraveAccent;
+    keys[33] = LeftBracket;
+    keys[30] = RightBracket;
+    keys[42] = Backslash;
+    keys[39] = Apostrophe;
+  }
+};
+
+extern "C" KeyMap const key_map {};

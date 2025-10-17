@@ -265,3 +265,10 @@ extern "C" void start() {
   init_heap();
   app_start();
 }
+extern "C" u8 const key_map[256];
+extern "C" void key(u32);
+extern "C" void wasm_key(u32 code) {
+  if (code >= 256)
+    return;
+  key(key_map[code]);
+}

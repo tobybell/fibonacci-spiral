@@ -1,6 +1,6 @@
 MODS=main print font-data
-OBJECTS=$(MODS:%=build/%.cc.o)
-WOBJECTS=$(MODS:%=build/%.w.o) build/malloc.w.o
+OBJECTS=$(MODS:%=build/%.cc.o) build/keymap-mac.cc.o
+WOBJECTS=$(MODS:%=build/%.w.o) build/malloc.w.o build/keymap-web.w.o
 
 all: main.wasm build/main
 
