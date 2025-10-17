@@ -259,3 +259,9 @@ void free(void* ptr) {
 [[nodiscard]] void* operator new(uptr size) { return malloc(size); }
 
 void operator delete(void* p) noexcept { return free(p); }
+
+extern "C" void app_start();
+extern "C" void start() {
+  init_heap();
+  app_start();
+}

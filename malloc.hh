@@ -1,7 +1,5 @@
 #pragma once
 
-namespace Slab {
-
 using u32 = unsigned;
 
 struct Allocator;
@@ -27,5 +25,3 @@ MemoryInfo memory_statistics(Allocator*);
 void enter_memory_pool(Allocator*);
 
 Allocator* exit_memory_pool();
-
-}  // namespace Slab

@@ -1,5 +1,5 @@
 #include "print.hh"
-#include "gui.hh"
+#include "gui-simp.hh"
 #include "sort.hh"
 
 using f32 = float;
@@ -47,11 +47,11 @@ void drawTriangleStrip(u32 base, u32 count);
 void drawTriangleStripInstanced(u32 base, u32 count, u32 instanceCount);
 void demo();
 
-void start();
+void app_start();
 void draw();
 void scroll(f32 x, f32 y, f32 dx, f32 dy);
 void key(u32 id);
-void resize(u32 width, u32 height);
+void resize(u32 width, u32 height, u32 scale);
 
 }
 
@@ -163,6 +163,7 @@ u32 textPositionBuffer;
 u32 multiLineTextProgram;
 u32 circleProgram;
 u32 rectProgram;
+u32 defaultVao;
 f32 gWidth, gHeight;  // resolution
 
 u32 uModelBuffer;
@@ -226,7 +227,7 @@ GlMat3 rot_y(GlMat3 R0, f32 th) {
 }
 
 void make_text_program() {
-  u32 v_multiline = make_vertex_shader(R"gl(#version 300 es
+  u32 v_multiline = make_vertex_shader(R"gl(
 uniform Position {
   ivec2 uPos;
 };
@@ -248,7 +249,7 @@ void main() {
   gl_Position = vec4(shift + coord, 0, 1);
 }
   )gl"_s);
-  u32 s0 = make_vertex_shader(R"gl(#version 300 es
+  u32 s0 = make_vertex_shader(R"gl(
 uniform Position {
   ivec2 uPos;
 };
@@ -269,7 +270,7 @@ void main() {
   gl_Position = vec4(shift + coord, 0, 1);
 }
   )gl"_s);
-  u32 s1 = make_fragment_shader(R"gl(#version 300 es
+  u32 s1 = make_fragment_shader(R"gl(
 uniform lowp usampler2D u_image;
 flat in lowp uint vGlyph;
 in mediump vec2 vCoord;
@@ -327,7 +328,7 @@ Vec3 grayu8(u8 g) { return rgbu8(g, g, g); }
 void circle(f32 x, f32 y, f32 r, Vec3 topColor, Vec3 bottomColor) {
   useProgram(circleProgram);
   enableBlend();
-  bindVertexArray(0);
+  bindVertexArray(defaultVao);
   vertexAttrib2f(0, x, y);
   vertexAttrib1f(1, r);
   vertexAttrib3f(2, topColor.x, topColor.y, topColor.z);
@@ -347,7 +348,7 @@ void disabledRadioButton(f32 x, f32 y) {
 
 void drawRect(u32 x, u32 y, u32 w, u32 h, Vec3 color) {
   useProgram(rectProgram);
-  bindVertexArray(0);
+  bindVertexArray(defaultVao);
   vertexAttrib4f(
     0, -1 + f32(x) * 2 / gWidth, 1 - f32(y) * 2 / gHeight, f32(w) * 2 / gWidth,
     -f32(h) * 2 / gHeight);
@@ -1031,7 +1032,9 @@ struct App {
     y = Dimension {lay, h, Y};
   }
 
+  u32 drawCount {};
   void draw() {
+    println("app draw ", drawCount++);
     for (u32 i: range(len(lay))) {
       if (lay[i].user) {
         Renderable* r = (Renderable*) lay[i].user;
@@ -1047,15 +1050,13 @@ struct App {
 
 static App* app;
 
-void start() {
-  init_heap();
-
+void app_start() {
   println("Hello!");
   make_texture(font_data, sizeof(font_data));
 
   make_text_program();
 
-  u32 circle_vshader = make_vertex_shader(R"gl(#version 300 es
+  u32 circle_vshader = make_vertex_shader(R"gl(
 uniform Resolution {
   highp vec2 uResolution;
   highp vec2 uPixel;
@@ -1079,7 +1080,7 @@ void main() {
   gl_Position = vec4(center + vCoord * uPixel, 0, 1);
 }
 )gl");
-  u32 circle_fshader = make_fragment_shader(R"gl(#version 300 es
+  u32 circle_fshader = make_fragment_shader(R"gl(
 in highp vec2 vCoord;
 in highp float vGradient;
 flat in highp float vRadius;
@@ -1097,7 +1098,7 @@ void main() {
 )gl");
   circleProgram = make_program((u32[]) {circle_vshader, circle_fshader});
 
-  u32 rect_vshader = make_vertex_shader(R"gl(#version 300 es
+  u32 rect_vshader = make_vertex_shader(R"gl(
 layout (location = 0) in mediump vec4 aRect;
 layout (location = 1) in mediump vec3 aColor;
 flat out lowp vec3 vColor;
@@ -1107,7 +1108,7 @@ void main() {
   gl_Position = vec4(aRect.xy + coord * aRect.zw, 0, 1);
 }
 )gl");
-  u32 rect_fshader = make_fragment_shader(R"gl(#version 300 es
+  u32 rect_fshader = make_fragment_shader(R"gl(
 flat in lowp vec3 vColor;
 out lowp vec4 oColor;
 void main() {
@@ -1115,9 +1116,10 @@ void main() {
 }
 )gl");
   rectProgram = make_program((u32[]) {rect_vshader, rect_fshader});
+  defaultVao = makeVertexArray();
 
   app = new App;
-  u32 s0 = make_vertex_shader(R"gl(#version 300 es
+  u32 s0 = make_vertex_shader(R"gl(
 #define pi 3.1415926535897932
 #define N 32
 uniform Settings {
@@ -1147,7 +1149,7 @@ void main() {
 }
   )gl"_s);
 
-  u32 s1 = make_fragment_shader(R"gl(#version 300 es
+  u32 s1 = make_fragment_shader(R"gl(
 out mediump vec4 frag_color;
 void main() {
   mediump float rz = (gl_FragCoord.z * 2. - 1.) / gl_FragCoord.w;
@@ -1158,7 +1160,7 @@ void main() {
 
   program = make_program((u32[]) {s0, s1});
 
-  u32 s2 = make_vertex_shader(R"gl(#version 300 es
+  u32 s2 = make_vertex_shader(R"gl(
 uniform Settings {
   vec3 u_pos;
 };
@@ -1172,7 +1174,7 @@ void main() {
   gl_Position = u_view * vec4(pos, 1);
 }
 )gl");
-u32 s3 = make_fragment_shader(R"gl(#version 300 es
+u32 s3 = make_fragment_shader(R"gl(
 out mediump vec4 frag_color;
 void main() {
   frag_color = vec4(1, 0, 1, 1);
@@ -1217,6 +1219,7 @@ void main() {
 
 void scroll(f32 x, f32 y, f32 dx, f32 dy) {
   R = rot_x(rot_y(R, dx / 50), dy / 50);
+  redraw();
 }
 
 void key(u32 id) {
@@ -1225,16 +1228,17 @@ void key(u32 id) {
 
 f32 aspect = 1;
 
-void resize(u32 width, u32 height) {
+void resize(u32 width, u32 height, u32 scale) {
+  println("UserResize! ", width, ' ', height);
   gWidth = f32(width);
   gHeight = f32(height);
   aspect = f32(width) / f32(height);
   fillBuffer(uResolutionBuffer, 0, (f32[]) {f32(width), f32(height)}, 8);
   fillBuffer(uResolutionBuffer, 8, (f32[]) {2 / f32(width), 2 / f32(height)}, 8);
-  set_viewport(0, 0, width, height);
+  set_viewport(0, 0, width * scale, height * scale);
 
   app->resize(width, height);
-  app->draw();
+  redraw();
 }
 
 struct ModelUnifom {
@@ -1243,6 +1247,7 @@ struct ModelUnifom {
 };
 
 void draw() {
+  println("UserDraw!");
   R = rot_y(R);
 
   ModelUnifom u;
