@@ -4,7 +4,7 @@ WOBJECTS=$(MODS:%=build/%.w.o) build/malloc.w.o build/keymap-web.w.o
 
 all: main.wasm build/main
 
-build/main: build/main-mac.m.o build/glad.c.o $(OBJECTS)
+build/main: build/main-mac.m.o build/print-float.c.o build/glad.c.o $(OBJECTS)
 	clang++ -o $@ -O2 -MD $^ -framework OpenGL -framework Cocoa
 
 build/%.m.o: %.m
@@ -22,7 +22,7 @@ build/%.ll: %.cc
 build/%.cc.o: %.cc
 	clang++ -o $@ -fno-rtti -O2 -MD -std=c++17 -c $<
 
-build/glad.c.o: glad.c
+build/%.c.o: %.c
 	clang -o $@ -O2 -MD -std=c11 -c $<
 
 -include $(OBJECTS:.o=.d)

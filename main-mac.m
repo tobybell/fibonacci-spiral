@@ -21,6 +21,7 @@ void resize(u32 w, u32 h, u32 k);
 void draw();
 void scroll(f32 x, f32 y, f32 dx, f32 dy);
 void key(u32 k);
+void mouseDown(f32 x, f32 y);
 
 void console_log(char const* s, u32 n) { check(write(1, s, n) == n); }
 
@@ -95,7 +96,8 @@ Proc getProcAddressNSGL(const char* name) {
 
 - (void)mouseDown:(NSEvent*)event {
   NSPoint mouseLocation = [event locationInWindow];
-  double y = [self frame].size.height - mouseLocation.y;
+  CGSize size = self.frame.size;
+  double y = size.height - mouseLocation.y;
   if (y < 40) {
     dragging = true;
     [[self window] performWindowDragWithEvent:event];
@@ -103,7 +105,9 @@ Proc getProcAddressNSGL(const char* name) {
   } else {
     dragging = false;
   }
-  // cocoaMouseDown(user, mouseLocation.x, y);
+  double gx = mouseLocation.x / size.width * 2 - 1;
+  double gy = mouseLocation.y / size.height * 2 - 1;
+  mouseDown((f32) gx, (f32) gy);
 }
 
 - (void)rightMouseDown:(NSEvent*)event {

@@ -1,5 +1,7 @@
 #include "print.hh"
 
+extern "C" char* float_to_string(f32 x, char* buffer);
+
 static void print_uint(Print& s, u64 x, u32 max) {
   u32 cur = s.chars.size;
   s.chars.expand(cur + max);
@@ -24,6 +26,14 @@ static void print_int(Print& s, i64 x, u32 max) {
     x = -x;
   }
   print_uint(s, u64(x), max);
+}
+
+void print(f32 x, Print& s) {
+  u32 cur = s.chars.size;
+  s.chars.expand(cur + 16);
+  auto it = s.chars.begin() + cur;
+  auto end = float_to_string(x, it);
+  s.chars.size = u32(end - s.chars.begin());
 }
 
 void print(u8 x, Print& s) { print_uint(s, x, 3); }

@@ -50,6 +50,7 @@ void start();
 void draw();
 void scroll(f32 x, f32 y, f32 dx, f32 dy);
 void key(u32 id);
+void mouseDown(f32 x, f32 y);
 void resize(u32 width, u32 height, u32 scale);
 }
 
@@ -890,6 +891,13 @@ struct App {
     //auto cmp = radio_button(onoff);
     //cleanup = cmp();
 
+    // subscriber going out of scope should always unsubscribe from its source
+    // who keeps the element alive?
+    // window deallocates the window controller
+    // parent deallocates its children
+    // parent owns its children
+    // if you create a hierarchy and add a bunch of children to it, you can just keep non-owning references to them
+
     auto sidebar = col(200, 0, 0, 1);
     auto title_bar = row(0, 0, 1, 0,
         row(200, 0, 1, 1),  // left spacer
@@ -941,6 +949,10 @@ struct App {
       }
     }
     redraw();
+  }
+
+  void mouseDown(f32 x, f32 y) {
+    println("mouseDown ", x, ' ', y);
   }
 
   void resize(u32 w, u32 h) {
@@ -1139,6 +1151,10 @@ void scroll(f32 x, f32 y, f32 dx, f32 dy) {
 
 void key(u32 id) {
   app->key((Key) id);
+}
+
+void mouseDown(f32 x, f32 y) {
+  app->mouseDown(x, y);
 }
 
 f32 aspect = 1;
