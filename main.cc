@@ -922,7 +922,6 @@ struct App {
   }
 
   void key(Key key) {
-    dump(key);
     onoff = !onoff.value;
     if (key == Backspace) {
       if (string) {
@@ -952,7 +951,6 @@ struct App {
 
   u32 drawCount {};
   void draw() {
-    println("app draw ", drawCount++);
     for (u32 i: range(len(lay))) {
       if (lay[i].user) {
         Renderable* r = (Renderable*) lay[i].user;
@@ -1147,7 +1145,6 @@ void key(u32 id) {
 f32 aspect = 1;
 
 void resize(u32 width, u32 height, u32 scale) {
-  println("UserResize! ", width, ' ', height);
   gWidth = f32(width);
   gHeight = f32(height);
   aspect = f32(width) / f32(height);
@@ -1165,7 +1162,6 @@ struct ModelUnifom {
 };
 
 void draw() {
-  println("UserDraw!");
   R = rot_y(R);
 
   ModelUnifom u;
