@@ -107,23 +107,21 @@ Proc getProcAddressNSGL(const char* name) {
 }
 
 - (void)rightMouseDown:(NSEvent*)event {
-  NSPoint mouseLocation = [event locationInWindow];
-  double y = [self frame].size.height - mouseLocation.y;
+  // NSPoint mouseLocation = [event locationInWindow];
+  // double y = [self frame].size.height - mouseLocation.y;
   // cocoaRightMouse(user, mouseLocation.x, y);
 }
 
 - (void)mouseDragged:(NSEvent*)event {
   if (dragging)
     return;
-  NSPoint mouseLocation = [event locationInWindow];
-  double y = [self frame].size.height - mouseLocation.y;
+  // NSPoint mouseLocation = [event locationInWindow];
+  // double y = [self frame].size.height - mouseLocation.y;
   // cocoaMouseDrag(user, mouseLocation.x, y);
 }
 
 - (void)reshape {
   [super reshape];
-  CGRect frame = [self frame];
-  [[self openGLContext] makeCurrentContext];
   resized = 1;
 }
 
@@ -262,10 +260,10 @@ void open_with_callback(u32 w, u32 h) {
 
 void gui_run(void) { [NSApp run]; }
 
-u32 create_shader(u32 type, char const* source, int len) {
+u32 createShader(u32 type, char const* source, u32 len) {
   u32 shader = glCreateShader(type);
   char const* srcs[] = {"#version 330 core\n", source};
-  int lens[] = {18, len};
+  int lens[] = {18, (int) len};
   glShaderSource(shader, 2, srcs, lens);
   glCompileShader(shader);
   GLint compileStatus;
@@ -311,10 +309,10 @@ u32 makeVertexArray() {
 void bindVertexArray(u32 vertexArray) { glBindVertexArray(vertexArray); }
 void dropVertexArray(u32 vertexArray) { glDeleteVertexArrays(1, &vertexArray); }
 u32 make_vertex_shader(char const* source, u32 len) {
-  return create_shader(GL_VERTEX_SHADER, source, len);
+  return createShader(GL_VERTEX_SHADER, source, len);
 }
 u32 make_fragment_shader(char const* source, u32 len) {
-  return create_shader(GL_FRAGMENT_SHADER, source, len);
+  return createShader(GL_FRAGMENT_SHADER, source, len);
 }
 void set_viewport(u32 x, u32 y, u32 dx, u32 dy) {
   glViewport((int) x, (int) y, (int) dx, (int) dy);
@@ -325,7 +323,7 @@ void vertexAttributeArrayU8(
   glEnableVertexAttribArray(attrib);
   glBindBuffer(GL_ARRAY_BUFFER, buffer);
   glVertexAttribIPointer(
-      attrib, components, GL_UNSIGNED_BYTE, stride,
+      attrib, (int) components, GL_UNSIGNED_BYTE, (int) stride,
       (void const*) (uptr) offset);
   glVertexAttribDivisor(attrib, instanceDivisor);
 }
@@ -335,7 +333,8 @@ void vertexAttributeArrayI16(
   glEnableVertexAttribArray(attrib);
   glBindBuffer(GL_ARRAY_BUFFER, buffer);
   glVertexAttribIPointer(
-      attrib, components, GL_SHORT, stride, (void const*) (uptr) offset);
+      attrib, (int) components, GL_SHORT, (int) stride,
+      (void const*) (uptr) offset);
   glVertexAttribDivisor(attrib, instanceDivisor);
 }
 u32 make_program(u32 const* shader_id, u32 n_shader) {
@@ -355,9 +354,12 @@ u32 make_program(u32 const* shader_id, u32 n_shader) {
   return program;
 }
 void useProgram(u32 program) { glUseProgram(program); }
-void drawPoints(u32 base, u32 count) { glDrawArrays(GL_POINTS, base, count); }
+void drawPoints(u32 base, u32 count) {
+  glDrawArrays(GL_POINTS, (int) base, (int) count);
+}
 void drawTriangleStrip(u32 base, u32 count, u32 instanceCount) {
-  glDrawArraysInstanced(GL_TRIANGLE_STRIP, base, count, instanceCount);
+  glDrawArraysInstanced(
+      GL_TRIANGLE_STRIP, (int) base, (int) count, (int) instanceCount);
 }
 void redraw() {
   if (gv->resizing)
@@ -396,7 +398,7 @@ void make_texture(void const* src, u32 size) {
       GL_TEXTURE_2D,
       0,  // mip level
       GL_R8UI,  // internal format
-      size,  // width
+      (int) size,  // width
       1,  // height
       0,  // border
       GL_RED_INTEGER,  // source format

@@ -8,7 +8,7 @@ build/main: build/main-mac.m.o build/glad.c.o $(OBJECTS)
 	clang++ -o $@ -O2 -MD $^ -framework OpenGL -framework Cocoa
 
 build/%.m.o: %.m
-	clang -o $@ -O2 -MD -Wno-deprecated-declarations -c $<
+	clang -o $@ -O2 -MD -Wno-deprecated-declarations -Wall -Wextra -Wconversion -c $<
 
 main.wasm: $(WOBJECTS)
 	wasm-ld -o $@ --no-entry --export-all --import-undefined $^
