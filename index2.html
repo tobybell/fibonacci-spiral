@@ -127,10 +127,7 @@ const env = {
   drawPoints(base, count) {
     gl.drawArrays(gl.POINTS, base, count);
   },
-  drawTriangleStrip(base, count) {
-    gl.drawArrays(gl.TRIANGLE_STRIP, base, count);
-  },
-  drawTriangleStripInstanced(base, count, instanceCount) {
+  drawTriangleStrip(base, count, instanceCount) {
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, base, count, instanceCount);
   },
   redraw() {

@@ -43,8 +43,7 @@ void disableDepthTest();
 void set_viewport(i32 x, i32 y, u32 dx, u32 dy);
 void useProgram(u32 program);
 void drawPoints(u32 base, u32 count);
-void drawTriangleStrip(u32 base, u32 count);
-void drawTriangleStripInstanced(u32 base, u32 count, u32 instanceCount);
+void drawTriangleStrip(u32 base, u32 count, u32 instanceCount);
 void demo();
 
 void app_start();
@@ -250,7 +249,7 @@ void circle(f32 x, f32 y, f32 r, Vec3 topColor, Vec3 bottomColor) {
   vertexAttrib1f(1, r);
   vertexAttrib3f(2, topColor.x, topColor.y, topColor.z);
   vertexAttrib3f(3, bottomColor.x, bottomColor.y, bottomColor.z);
-  drawTriangleStripInstanced(0, 4, 1);
+  drawTriangleStrip(0, 4, 1);
   disableBlend();
 }
 
@@ -270,7 +269,7 @@ void drawRect(u32 x, u32 y, u32 w, u32 h, Vec3 color) {
     0, -1 + f32(x) * 2 / gWidth, 1 - f32(y) * 2 / gHeight, f32(w) * 2 / gWidth,
     -f32(h) * 2 / gHeight);
   vertexAttrib3f(1, color.x, color.y, color.z);
-  drawTriangleStripInstanced(0, 4, 1);
+  drawTriangleStrip(0, 4, 1);
 }
 
 struct MultiLineString {
@@ -309,7 +308,7 @@ struct MultiLineString {
   void draw() {
     va.bind();
     useProgram(multiLineTextProgram);
-    drawTriangleStripInstanced(0, 4, size);
+    drawTriangleStrip(0, 4, size);
   }
 };
 
@@ -325,7 +324,7 @@ void drawText(Str text, u32 x, u32 y, i16 (*colRow)[2]) {
   fillBuffer(buf, 0, colRow, size * 4);
   fillBuffer(buf, size * 4, text.begin(), size);
   fillBuffer(textPositionBuffer, 0, (u32[]) {x, y + 7}, 8);
-  drawTriangleStripInstanced(0, 4, size);
+  drawTriangleStrip(0, 4, size);
   dropBuffer(buf);
 }
 

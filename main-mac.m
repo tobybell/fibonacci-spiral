@@ -356,10 +356,7 @@ u32 make_program(u32 const* shader_id, u32 n_shader) {
 }
 void useProgram(u32 program) { glUseProgram(program); }
 void drawPoints(u32 base, u32 count) { glDrawArrays(GL_POINTS, base, count); }
-void drawTriangleStrip(u32 base, u32 count) {
-  glDrawArrays(GL_TRIANGLE_STRIP, base, count);
-}
-void drawTriangleStripInstanced(u32 base, u32 count, u32 instanceCount) {
+void drawTriangleStrip(u32 base, u32 count, u32 instanceCount) {
   glDrawArraysInstanced(GL_TRIANGLE_STRIP, base, count, instanceCount);
 }
 void redraw() {
