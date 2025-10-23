@@ -260,10 +260,10 @@ void free(void* ptr) {
 
 void operator delete(void* p) noexcept { return free(p); }
 
-extern "C" void app_start();
-extern "C" void start() {
+extern "C" void start();
+extern "C" void wasm_start() {
   init_heap();
-  app_start();
+  start();
 }
 extern "C" u8 const key_map[256];
 extern "C" void key(u32);

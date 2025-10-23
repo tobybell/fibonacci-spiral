@@ -46,12 +46,11 @@ void drawPoints(u32 base, u32 count);
 void drawTriangleStrip(u32 base, u32 count, u32 instanceCount);
 void demo();
 
-void app_start();
+void start();
 void draw();
 void scroll(f32 x, f32 y, f32 dx, f32 dy);
 void key(u32 id);
 void resize(u32 width, u32 height, u32 scale);
-
 }
 
 namespace {
@@ -966,7 +965,7 @@ struct App {
 
 static App* app;
 
-void app_start() {
+void start() {
   println("Hello!");
   make_texture(font_data, sizeof(font_data));
 

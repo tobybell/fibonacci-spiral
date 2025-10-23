@@ -16,7 +16,7 @@ typedef unsigned char u8;
 
 extern u8 const key_map[256];
 
-void app_start();
+void start();
 void resize(u32 w, u32 h, u32 k);
 void draw();
 void scroll(f32 x, f32 y, f32 dx, f32 dy);
@@ -255,7 +255,7 @@ void open_with_callback(u32 w, u32 h) {
   gv->user = nil;
 
   [window makeKeyAndOrderFront:nil];
-  app_start();
+  start();
 }
 
 void gui_run(void) { [NSApp run]; }
