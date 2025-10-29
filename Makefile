@@ -1,10 +1,10 @@
-MODS=main print font-data
-OBJECTS=$(MODS:%=build/%.cc.o) build/keymap-mac.cc.o
-WOBJECTS=$(MODS:%=build/%.w.o) build/malloc.w.o build/keymap-web.w.o
+MODS=main.cc print.cc font-data.cc print-float.c
+OBJECTS=$(MODS:%=build/%.o) build/keymap-mac.cc.o
+WOBJECTS=$(MODS:%=build/%.w.o) build/malloc.cc.w.o build/keymap-web.cc.w.o
 
 all: main.wasm build/main
 
-build/main: build/main-mac.m.o build/print-float.c.o build/glad.c.o $(OBJECTS)
+build/main: build/main-mac.m.o build/glad.c.o $(OBJECTS)
 	clang++ -o $@ -O2 -MD $^ -framework OpenGL -framework Cocoa
 
 build/%.m.o: %.m
@@ -16,8 +16,11 @@ main.wasm: $(WOBJECTS)
 build/%.w.o: build/%.ll
 	llc -o $@ -march=wasm32 -filetype=obj $<
 
-build/%.ll: %.cc
+build/%.cc.ll: %.cc
 	clang++ -o $@ --target=wasm32 -mbulk-memory -emit-llvm -fno-rtti -O2 -S -MD -std=c++17 -c $<
+
+build/%.c.ll: %.c
+	clang -o $@ --target=wasm32 -mbulk-memory -emit-llvm -O2 -S -MD -std=c11 -c $<
 
 build/%.cc.o: %.cc
 	clang++ -o $@ -fno-rtti -O2 -MD -std=c++17 -c $<

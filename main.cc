@@ -50,8 +50,9 @@ void start();
 void draw();
 void scroll(f32 x, f32 y, f32 dx, f32 dy);
 void key(u32 id);
-void mouseDown(f32 x, f32 y);
+bool mouseDown(f32 x, f32 y);
 void resize(u32 width, u32 height, u32 scale);
+
 }
 
 namespace {
@@ -937,6 +938,7 @@ struct App {
   }
 
   App() {
+    positions.push(3.14f);
     // subscriber going out of scope should always unsubscribe from its source
     // who keeps the element alive?
     // window deallocates the window controller
@@ -972,7 +974,7 @@ struct App {
     redraw();
   }
 
-  void mouseDown(f32 gx, f32 gy) {
+  bool mouseDown(f32 gx, f32 gy) {
     println("mouseDown ", gx, ' ', gy);
     positions.push(gx);
     didGenerate = 0;
@@ -987,6 +989,7 @@ struct App {
         break;
       }
     }
+    return 1;
   }
 
   void resize(u32 w, u32 h) {
@@ -1201,8 +1204,8 @@ void key(u32 id) {
   app->key((Key) id);
 }
 
-void mouseDown(f32 x, f32 y) {
-  app->mouseDown(x, y);
+bool mouseDown(f32 x, f32 y) {
+  return app->mouseDown(x, y);
 }
 
 f32 aspect = 1;

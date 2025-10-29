@@ -185,7 +185,7 @@ const env = {
 WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
   memory = mod.instance.exports.memory.buffer;
   const exports = mod.instance.exports;
-  exports.start();
+  exports.wasm_start();
 
   const draw = () => {
 //    gl.clear(gl.COLOR_BUFFER_BIT);
@@ -204,6 +204,17 @@ WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
     if (exports.wasm_key(e.keyCode))
       e.preventDefault();
   }, false);
+
+  document.addEventListener('mousedown', e => {
+    const r = canvas.getBoundingClientRect();
+    const gx = ((e.clientX - r.x) / r.width) * 2 - 1;
+    const gy = 1 - ((e.clientY - r.y) / r.height) * 2;
+    if (exports.mouseDown(gx, gy)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }
+  });
 
   const resize = () => {
     const {innerWidth: w, innerHeight: h, devicePixelRatio: k} = window;

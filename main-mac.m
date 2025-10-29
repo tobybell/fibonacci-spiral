@@ -21,7 +21,7 @@ void resize(u32 w, u32 h, u32 k);
 void draw();
 void scroll(f32 x, f32 y, f32 dx, f32 dy);
 void key(u32 k);
-void mouseDown(f32 x, f32 y);
+bool mouseDown(f32 x, f32 y);
 
 void console_log(char const* s, u32 n) { check(write(1, s, n) == n); }
 
