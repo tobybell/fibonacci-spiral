@@ -38,6 +38,13 @@ void println(T&&... x) {
   console_log(p.chars.begin(), p.chars.size);
 }
 
+template <class... T>
+String strcat(T const&... x) {
+  Print p;
+  sprint(p, x...);
+  return p.chars.take();
+}
+
 void print_array(
     char const* base, u32 size, u32 count, void (*)(char const*, Print&),
     Print&);

@@ -434,6 +434,9 @@ struct Array {
 };
 
 template <class T>
+Ref(Array<T> const&) -> Ref<T const>;
+
+template <class T>
 struct List {
   T* data = nullptr;
   u32 size = 0;

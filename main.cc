@@ -445,9 +445,11 @@ struct Cat {
   static T const* dat(T const& x) { return &x; }
   static T const* dat(List<T> const& x) { return x.begin(); }
   static T const* dat(Array<T> const& x) { return x.begin(); }
+  static T const* dat(Span<T> const& x) { return x.begin(); }
   static u32 get_len(T const& x) { return 1; }
   static u32 get_len(List<T> const& x) { return len(x); }
   static u32 get_len(Array<T> const& x) { return len(x); }
+  static u32 get_len(Span<T> const& x) { return len(x); }
   template <class S>
   static void put(T*& dst, S const& src) {
     u32 n = get_len(src);
@@ -487,6 +489,17 @@ auto colGap(
     .pad={pad, pad, pad, pad},
     .kids=sizeof...(T),
     .direction=Y}, kids...);
+}
+
+auto colGapN(
+    u32 minx, u32 miny, bool growx, bool growy, u16 pad, u16 childGap, u32 kids, Span<LayoutEntry> content) {
+  return cat(LayoutEntry {
+    .min={minx, miny},
+    .grow={growx, growy},
+    .childGap=childGap,
+    .pad={pad, pad, pad, pad},
+    .kids=kids,
+    .direction=Y}, content);
 }
 
 template <class... T>
@@ -548,10 +561,8 @@ struct TextNode: Renderable {
   }
 };
 
-template <u32 N>
-auto text(char const (&x)[N]) {
-  u32 len = N - 1;
-  check(!x[len]);
+auto text(Str x) {
+  u32 len = x.size;
 
   u32 maxWordLen = 0;
   u32 wordStart = 0;
@@ -568,7 +579,7 @@ auto text(char const (&x)[N]) {
 
   u32 minWidth = 6 * maxWordLen - 1;
   u32 maxWidth = 6 * len - 1;
-  return cat(LayoutEntry {.min={minWidth, 7}, .pref={maxWidth, 7}, .user=new TextNode(Ref(x, len))});
+  return cat(LayoutEntry {.min={minWidth, 7}, .pref={maxWidth, 7}, .user=new TextNode(x)});
 
   // add child to container... need to bubble up: layout child, layout parent,
   // layout parent, layout parent, etc. for each parent that changed, bubble
@@ -887,31 +898,32 @@ struct App {
   Dimension x;
   Dimension y;
 
-  App() {
-    //auto cmp = radio_button(onoff);
-    //cleanup = cmp();
+  u32 width;
+  u32 height;
 
-    // subscriber going out of scope should always unsubscribe from its source
-    // who keeps the element alive?
-    // window deallocates the window controller
-    // parent deallocates its children
-    // parent owns its children
-    // if you create a hierarchy and add a bunch of children to it, you can just keep non-owning references to them
+  bool didGenerate {};
+  bool didLayout {};
+
+  List<f32> positions;
+
+  Array<LayoutEntry> makeLayout() const {
+    println("makeLayout");
 
     auto sidebar = col(200, 0, 0, 1);
     auto title_bar = row(0, 0, 1, 0,
         row(200, 0, 1, 1),  // left spacer
         row(400, 30, 0, 0), // title
         spacer);  // right spacer
-    auto menu = colGap(0, 0, 0, 0, 5, 5,
-      row(0, 0, 1, 0, text("Hello"), minSpace(10), radioButton()),
-      row(0, 0, 1, 0, text("World"), minSpace(10), radioButton()),
-      row(0, 0, 1, 0, text("My"), minSpace(10), radioButton()),
-      row(0, 0, 1, 0, text("Name is"), minSpace(10), radioButton()),
-      row(0, 0, 1, 0, text("Toby"), minSpace(10), radioButton()));
+
+    List<LayoutEntry> menuItems;
+    for (auto p: positions)
+      extend(menuItems, Ref(row(0, 0, 1, 0, text(strcat("Item ", p)), minSpace(10), radioButton())));
+    auto menu = colGapN(0, 0, 0, 0, 5, 5, len(positions), menuItems);
+
     auto lipsum = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
     auto lipsum2 = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
-    lay = row(0, 0, 1, 1,
+
+    return row(0, 0, 1, 1,
       sidebar,
       col(0, 0, 1, 1,
         title_bar,
@@ -922,6 +934,15 @@ struct App {
         ),
         row(0, 0, 1, 1, menu, lipsum, lipsum2)  // main content
       ));
+  }
+
+  App() {
+    // subscriber going out of scope should always unsubscribe from its source
+    // who keeps the element alive?
+    // window deallocates the window controller
+    // parent deallocates its children
+    // parent owns its children
+    // if you create a hierarchy and add a bunch of children to it, you can just keep non-owning references to them
   }
 
   ~App() {
@@ -951,17 +972,44 @@ struct App {
     redraw();
   }
 
-  void mouseDown(f32 x, f32 y) {
-    println("mouseDown ", x, ' ', y);
+  void mouseDown(f32 gx, f32 gy) {
+    println("mouseDown ", gx, ' ', gy);
+    positions.push(gx);
+    didGenerate = 0;
+    redraw();
+    u32 px = u32((gx + 1) / 2 * f32(width));
+    u32 py = u32((1 - gy) / 2 * f32(height));
+    for (u32 j: range(len(lay))) {
+      u32 i = len(lay) - j - 1;
+      if (px >= x.pos[i] && px < x.pos[i] + x.size[i] &&
+          py >= y.pos[i] && py < y.pos[i] + y.size[i]) {
+        println("hit");
+        break;
+      }
+    }
   }
 
   void resize(u32 w, u32 h) {
-    x = Dimension {lay, w, X};
-    y = Dimension {lay, h, Y};
+    width = w;
+    height = h;
+    didLayout = 0;
   }
 
   u32 drawCount {};
   void draw() {
+
+    if (!didGenerate) {
+      didGenerate = 1;
+      didLayout = 0;
+      lay = makeLayout();
+    }
+
+    if (!didLayout) {
+      didLayout = 1;
+      x = Dimension {lay, width, X};
+      y = Dimension {lay, height, Y};
+    }
+
     for (u32 i: range(len(lay))) {
       if (lay[i].user) {
         Renderable* r = (Renderable*) lay[i].user;
