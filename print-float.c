@@ -1,7 +1,3 @@
-#include <math.h>
-#include <string.h>
-#include <stdlib.h>
-
 typedef double f64;
 typedef float f32;
 typedef unsigned long long u64;
@@ -9,6 +5,11 @@ typedef unsigned u32;
 typedef int i32;
 typedef _Bool bool;
 
+[[noreturn]] void abort();
+
+#define memcpy __builtin_memcpy
+#define floor __builtin_floor
+#define ceil __builtin_ceil
 #define check(x) if (!(x)) abort()
 
 static void reverse(char* a, char* b) {
@@ -17,6 +18,21 @@ static void reverse(char* a, char* b) {
     *a++ = *b;
     *b = t;
   }
+}
+
+static f64 upow(f64 a, u32 b) {
+  f64 c = 1;
+  while (b) {
+    if (b & 1)
+      c *= a;
+    a *= a;
+    b >>= 1;
+  }
+  return c;
+}
+
+static f64 pow(f64 a, i32 b) {
+  return b < 0 ? 1. / upow(a, (u32) -b) : upow(a, (u32) b);
 }
 
 // computes `a * 2^b / 10^c`
@@ -185,10 +201,10 @@ char* float_to_string(f32 x, char* buffer) {
 
   u32 a, b;
   if (sig_bits & 1) {  // odd, round away -> open interval
-    a = (u32) floor(lo) + 1;
+    a = (u32) floor(lo);
     b = (u32) ceil(hi) - 1;
   } else {  // even, round towards -> closed interval
-    a = (u32) ceil(lo);
+    a = (u32) ceil(lo) - 1;
     b = (u32) floor(hi);
   }
 
