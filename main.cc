@@ -422,9 +422,22 @@ struct LayoutEntry {
   Direction direction;  // meaningless if `!kids`
 
   void* user;
+
+  bool active;
+  Array<LayoutEntry> (*activeGenerate)(void*);
+  void (*activeDrop)(void*);
 };
 
 constexpr LayoutEntry spacer {.grow = {1, 1}};
+
+template <class T>
+LayoutEntry activeComponent(T* obj) {
+  return {
+      .user = obj,
+      .active = 1,
+      .activeGenerate = [](void* p) { return (*(T*) p)(); },
+      .activeDrop = [](void* p) { delete (T*) p; }};
+}
 
 LayoutEntry minSpace(u32 minSize) {
   return {.min = {minSize, minSize}, .grow= {1, 1}};
@@ -620,9 +633,20 @@ auto radioButton() {
 }
 
 template <class T>
-Span<T> slice(List<T> const& x, u32 base) {
+Ref<T> slice(Ref<T> x, u32 base) {
   check(base <= len(x));
   return {x.begin() + base, len(x) - base};
+}
+
+template <class T>
+Span<T> slice(List<T> const& x, u32 base) {
+  return slice(x.span(), base);
+}
+
+template <class T>
+Ref<T> slice(Ref<T> x, u32 base, u32 size) {
+  check(base + size <= len(x));
+  return {x.begin() + base, size};
 }
 
 struct GrowthDistribution {
@@ -888,6 +912,11 @@ constexpr Vec3 red {1, 0, 0};
 constexpr Vec3 green {0, 1, 0};
 constexpr Vec3 blue {0, 0, 1};
 
+template <class T>
+Array<T> empty(u32 n) {
+  return Array((T*) malloc(n * sizeof(T)), n);
+}
+
 struct App {
   List<char> string;
   MultiLineString str;
@@ -902,13 +931,116 @@ struct App {
   u32 width;
   u32 height;
 
-  bool didGenerate {};
   bool didLayout {};
 
   List<f32> positions;
 
+  struct ActiveRegion {
+    void* aux;
+    Array<LayoutEntry> (*gen)(void*);
+    void (*drop)(void*);
+    u32 id;
+    u32 begin;
+    u32 end;
+    u32 kidCount;
+
+    void dropKids(List<u32>& freeRegions) {
+      auto kids = (ActiveRegion**) (this + 1);
+      for (u32 i {}; i < kidCount; ++i) {
+        auto kid = kids[i];
+        freeRegions.push(kid->id);
+        kid->dropKids(freeRegions);
+        kid->drop(kid->aux);
+        delete kid;
+      }
+    }
+  };
+
+  Own<ActiveRegion> root;
+  List<ActiveRegion*> regions;
+  List<u32> freeRegions;
+
+  void evaluateLayout(List<LayoutEntry>& dst, Array<LayoutEntry> content) {
+    for (auto& entry: content) {
+      if (entry.active) {
+        u32 id;
+        if (freeRegions) {
+          id = freeRegions.last();
+          freeRegions.pop();
+        } else {
+          id = len(regions);
+          regions.emplace();
+        }
+        evaluateLayout(
+            dst, id, entry.user, entry.activeGenerate, entry.activeDrop);
+      } else {
+        dst.push(entry);
+      }
+    }
+  }
+
+  void evaluateLayout(
+      List<LayoutEntry>& dst, u32 id, void* user,
+      Array<LayoutEntry> (*gen)(void*), void (*drop)(void*)) {
+    u32 begin = len(dst);
+    auto content = gen(user);
+    List<ActiveRegion*> kids;
+    for (auto& entry: content) {
+      if (entry.active) {
+        u32 id;
+        if (freeRegions) {
+          id = freeRegions.last();
+          freeRegions.pop();
+        } else {
+          id = len(regions);
+          regions.emplace();
+        }
+        evaluateLayout(
+            dst, id, entry.user, entry.activeGenerate, entry.activeDrop);
+        kids.push(regions[id]);
+      } else {
+        dst.push(entry);
+      }
+    }
+    u32 end = len(dst);
+    auto kidsSize = len(kids) * sizeof(ActiveRegion*);
+    auto ans = (ActiveRegion*) malloc(
+        sizeof(ActiveRegion) + len(kids) * sizeof(ActiveRegion*));
+    ans->aux = user;
+    ans->gen = gen;
+    ans->drop = drop;
+    ans->begin = begin;
+    ans->end = end;
+    ans->kidCount = len(kids);
+    memcpy(ans + 1, kids.begin(), kidsSize);
+    ans->id = id;
+    regions[id] = ans;
+  }
+
+  void regenRegion(ActiveRegion* region) {
+    region->dropKids(freeRegions);
+    List<LayoutEntry> newLayout;
+    extend(newLayout, slice(lay.span(), 0, region->begin));
+    evaluateLayout(
+        newLayout, region->id, region->aux, region->gen, region->drop);
+    extend(newLayout, slice(lay.span(), region->end));
+    free(region);
+    lay = newLayout.take();
+  }
+
   Array<LayoutEntry> makeLayout() const {
     println("makeLayout");
+
+    auto ans = List<LayoutEntry>();
+    ans.push(
+        LayoutEntry {
+            .min = {10, 10}, .grow = {1, 1}, .kids = 3, .direction = X});
+    extend(ans, text("Hello").span());
+    ans.push(activeComponent(
+        new auto([count = 0]() mutable { return text(strcat(count++)); })));
+    extend(ans, text("Hello").span());
+    // ans.push(LayoutEntry {
+    return ans.take();
 
     auto sidebar = col(200, 0, 0, 1);
     auto title_bar = row(0, 0, 1, 0,
@@ -945,6 +1077,10 @@ struct App {
     // parent deallocates its children
     // parent owns its children
     // if you create a hierarchy and add a bunch of children to it, you can just keep non-owning references to them
+
+    List<LayoutEntry> news;
+    evaluateLayout(news, makeLayout());
+    lay = news.take();
   }
 
   ~App() {
@@ -977,7 +1113,13 @@ struct App {
   bool mouseDown(f32 gx, f32 gy) {
     println("mouseDown ", gx, ' ', gy);
     positions.push(gx);
-    didGenerate = 0;
+
+    dump(len(regions));
+    regenRegion(regions[0]);
+
+    // TODO: Allow re-laying-out only parts of the tree?
+    didLayout = 0;
+
     redraw();
     u32 px = u32((gx + 1) / 2 * f32(width));
     u32 py = u32((1 - gy) / 2 * f32(height));
@@ -1000,12 +1142,6 @@ struct App {
 
   u32 drawCount {};
   void draw() {
-
-    if (!didGenerate) {
-      didGenerate = 1;
-      didLayout = 0;
-      lay = makeLayout();
-    }
 
     if (!didLayout) {
       didLayout = 1;
