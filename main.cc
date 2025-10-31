@@ -593,7 +593,7 @@ auto text(Str x) {
 
   u32 minWidth = 6 * maxWordLen - 1;
   u32 maxWidth = 6 * len - 1;
-  return cat(LayoutEntry {.min={minWidth, 7}, .pref={maxWidth, 7}, .user=new TextNode(x)});
+  return cat(LayoutEntry {.min={minWidth, 7}, .pref={maxWidth, 7}, .user=new TextNode(x), .activeDrop=[](void* p) { delete (TextNode*) p; }});
 
   // add child to container... need to bubble up: layout child, layout parent,
   // layout parent, layout parent, etc. for each parent that changed, bubble
@@ -629,7 +629,7 @@ struct ContainerMount: Mount {
 };
 
 auto radioButton() {
-  return LayoutEntry {.min={14, 14}, .pref={14, 14}, .user=new RadioNode};
+  return LayoutEntry {.min={14, 14}, .pref={14, 14}, .user=new RadioNode, .activeDrop=[](void* p) { delete (RadioNode*) p; }};
 }
 
 template <class T>
@@ -939,28 +939,25 @@ struct App {
     void* aux;
     Array<LayoutEntry> (*gen)(void*);
     void (*drop)(void*);
-    u32 id;
     u32 begin;
     u32 end;
-    u32 kidCount;
-
-    void dropKids(List<u32>& freeRegions) {
-      auto kids = (ActiveRegion**) (this + 1);
-      for (u32 i {}; i < kidCount; ++i) {
-        auto kid = kids[i];
-        freeRegions.push(kid->id);
-        kid->dropKids(freeRegions);
-        kid->drop(kid->aux);
-        delete kid;
-      }
-    }
+    Array<u32> kids;
   };
 
-  Own<ActiveRegion> root;
-  List<ActiveRegion*> regions;
+  List<ActiveRegion> regions;
   List<u32> freeRegions;
 
-  void evaluateLayout(List<LayoutEntry>& dst, Array<LayoutEntry> content) {
+  void dropKids(ActiveRegion& region) {
+    for (u32 k: region.kids) {
+      auto& kid = regions[k];
+      dropKids(kid);
+      kid.kids = {};
+      kid.drop(kid.aux);
+      freeRegions.push(k);
+    }
+  }
+
+  void evaluateLayout(List<LayoutEntry>& dst, List<u32>& kids, Array<LayoutEntry> content) {
     for (auto& entry: content) {
       if (entry.active) {
         u32 id;
@@ -971,76 +968,53 @@ struct App {
           id = len(regions);
           regions.emplace();
         }
-        evaluateLayout(
-            dst, id, entry.user, entry.activeGenerate, entry.activeDrop);
+        kids.push(id);
+        auto& ans = regions[id];
+        ans.aux = entry.user;
+        ans.gen = entry.activeGenerate;
+        ans.drop = entry.activeDrop;
+        ans.begin = len(dst);
+        List<u32> newKids;
+        evaluateLayout(dst, newKids, ans.gen(ans.aux));
+        ans.end = len(dst);
+        ans.kids = newKids.take();
       } else {
         dst.push(entry);
       }
     }
   }
 
-  void evaluateLayout(
-      List<LayoutEntry>& dst, u32 id, void* user,
-      Array<LayoutEntry> (*gen)(void*), void (*drop)(void*)) {
-    u32 begin = len(dst);
-    auto content = gen(user);
-    List<ActiveRegion*> kids;
-    for (auto& entry: content) {
-      if (entry.active) {
-        u32 id;
-        if (freeRegions) {
-          id = freeRegions.last();
-          freeRegions.pop();
-        } else {
-          id = len(regions);
-          regions.emplace();
-        }
-        evaluateLayout(
-            dst, id, entry.user, entry.activeGenerate, entry.activeDrop);
-        kids.push(regions[id]);
-      } else {
-        dst.push(entry);
-      }
-    }
-    u32 end = len(dst);
-    auto kidsSize = len(kids) * sizeof(ActiveRegion*);
-    auto ans = (ActiveRegion*) malloc(
-        sizeof(ActiveRegion) + len(kids) * sizeof(ActiveRegion*));
-    ans->aux = user;
-    ans->gen = gen;
-    ans->drop = drop;
-    ans->begin = begin;
-    ans->end = end;
-    ans->kidCount = len(kids);
-    memcpy(ans + 1, kids.begin(), kidsSize);
-    ans->id = id;
-    regions[id] = ans;
+  List<u32> stealAsList(Array<u32>& x) {
+    auto n = exchange(x.size, 0u);
+    return List(exchange(x.data, nullptr), n, n);
   }
 
-  void regenRegion(ActiveRegion* region) {
-    region->dropKids(freeRegions);
+  void regenRegion(u32 id) {
+    auto& region = regions[id];
+    dropKids(region);
     List<LayoutEntry> newLayout;
-    extend(newLayout, slice(lay.span(), 0, region->begin));
-    evaluateLayout(
-        newLayout, region->id, region->aux, region->gen, region->drop);
-    extend(newLayout, slice(lay.span(), region->end));
-    free(region);
+
+    // free old kids
+    for (u32 i = region.begin; i < region.end; ++i) {
+      auto& entry = lay[i];
+      check(!entry.active);
+      if (entry.user)
+        entry.activeDrop(entry.user);
+    }
+
+    extend(newLayout, slice(lay.span(), 0, region.begin));
+    auto newKids = stealAsList(region.kids);
+    newKids.shrink(0);
+    evaluateLayout(newLayout, newKids, region.gen(region.aux));
+    auto newEnd = len(newLayout);
+    extend(newLayout, slice(lay.span(), region.end));
+    region.end = newEnd;
+    region.kids = newKids.take();
     lay = newLayout.take();
   }
 
   Array<LayoutEntry> makeLayout() const {
     println("makeLayout");
-
-    auto ans = List<LayoutEntry>();
-    ans.push(
-        LayoutEntry {
-            .min = {10, 10}, .grow = {1, 1}, .kids = 3, .direction = X});
-    extend(ans, text("Hello").span());
-    ans.push(activeComponent(
-        new auto([count = 0]() mutable { return text(strcat(count++)); })));
-    extend(ans, text("Hello").span());
-    // ans.push(LayoutEntry {
-    return ans.take();
 
     auto sidebar = col(200, 0, 0, 1);
     auto title_bar = row(0, 0, 1, 0,
@@ -1048,10 +1022,17 @@ struct App {
         row(400, 30, 0, 0), // title
         spacer);  // right spacer
 
-    List<LayoutEntry> menuItems;
-    for (auto p: positions)
-      extend(menuItems, Ref(row(0, 0, 1, 0, text(strcat("Item ", p)), minSpace(10), radioButton())));
-    auto menu = colGapN(0, 0, 0, 0, 5, 5, len(positions), menuItems);
+    LayoutEntry menuComponent {
+      .user = (void*) this,
+      .active = 1,
+      .activeGenerate = [](void* ptr) {
+        auto& self = *(App const*) ptr;
+        List<LayoutEntry> menuItems;
+        for (auto p: self.positions)
+          extend(menuItems, Ref(row(0, 0, 1, 0, text(strcat("Item ", p)), minSpace(10), radioButton())));
+        return colGapN(0, 0, 0, 0, 5, 5, len(self.positions), menuItems);
+      },
+      .activeDrop = [](void*) {}};
 
     auto lipsum = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
     auto lipsum2 = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
@@ -1065,7 +1046,7 @@ struct App {
           row(200, 40, 1, 0),  // left tab
           row(200, 40, 1, 0)  // right tab
         ),
-        row(0, 0, 1, 1, menu, lipsum, lipsum2)  // main content
+        row(0, 0, 1, 1, menuComponent, lipsum, lipsum2)  // main content
       ));
   }
 
@@ -1079,7 +1060,8 @@ struct App {
     // if you create a hierarchy and add a bunch of children to it, you can just keep non-owning references to them
 
     List<LayoutEntry> news;
-    evaluateLayout(news, makeLayout());
+    List<u32> unusedKids;
+    evaluateLayout(news, unusedKids, makeLayout());
     lay = news.take();
   }
 
@@ -1114,13 +1096,9 @@ struct App {
     println("mouseDown ", gx, ' ', gy);
     positions.push(gx);
 
-    dump(len(regions));
-    regenRegion(regions[0]);
-
-    // TODO: Allow re-laying-out only parts of the tree?
-    didLayout = 0;
-
     redraw();
+
+    /*
     u32 px = u32((gx + 1) / 2 * f32(width));
     u32 py = u32((1 - gy) / 2 * f32(height));
     for (u32 j: range(len(lay))) {
@@ -1131,6 +1109,12 @@ struct App {
         break;
       }
     }
+    */
+
+    // TODO: Allow re-laying-out only parts of the tree?
+    regenRegion(0);
+    didLayout = 0;
+
     return 1;
   }
 

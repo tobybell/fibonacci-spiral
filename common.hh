@@ -453,6 +453,8 @@ struct List {
     }
   }
 
+  explicit List(T* base, u32 size_, u32 capacity_): data(base), size(size_), capacity(capacity_) {}
+
   List(Ref<T> y): List(Span<T>(y)) {}
 
   template <u32 N>
@@ -512,6 +514,13 @@ struct List {
     --size;
     if constexpr (!is_trivially_destructible<T>)
       data[size].~T();
+  }
+
+  void shrink(u32 newSize) {
+    check(newSize <= size);
+    for (u32 i = size; i-- > newSize;)
+      data[i].~T();
+    size = newSize;
   }
 
   T const& last() const {
