@@ -55,18 +55,14 @@ void resize(u32 width, u32 height, u32 scale);
 
 }
 
+void init_heap();
+
 namespace {
 
 template <class T, class F>
 void sort(Ref<T> elem, F&& cmp) {
   quicksort(elem.begin(), elem.end(), cmp);
 }
-
-}
-
-void init_heap();
-
-namespace {
 
 u32 make_vertex_shader(Str s) { return ::make_vertex_shader(s.base, s.size); }
 u32 make_fragment_shader(Str s) { return ::make_fragment_shader(s.base, s.size); }
@@ -425,7 +421,9 @@ struct LayoutEntry {
 
   bool active;
   Array<LayoutEntry> (*activeGenerate)(void*);
-  void (*activeDrop)(void*);
+  void (*drop)(void*);
+  void (*draw)(void*, i32 x, i32 y, u32 dx, u32 dy);
+  void (*click)(void*);
 };
 
 constexpr LayoutEntry spacer {.grow = {1, 1}};
@@ -436,7 +434,7 @@ LayoutEntry activeComponent(T* obj) {
       .user = obj,
       .active = 1,
       .activeGenerate = [](void* p) { return (*(T*) p)(); },
-      .activeDrop = [](void* p) { delete (T*) p; }};
+      .drop = [](void* p) { delete (T*) p; }};
 }
 
 LayoutEntry minSpace(u32 minSize) {
@@ -525,25 +523,10 @@ auto row(u32 minx, u32 miny, bool growx, bool growy, T&&... kids) {
     .direction=X}, kids...);
 }
 
-struct Renderable {
-  virtual void draw(i32 x, i32 y, u32 dx, u32 dy) = 0;
-  virtual ~Renderable() = default;
-};
-
-struct RadioNode: Renderable {
-  void draw(i32 x, i32 y, u32 dx, u32 dy) override {
-    check(dx == 14);
-    check(dy == 14);
-    f32 fx = -1 + f32(x + 7) * 2 / gWidth;
-    f32 fy = 1 - f32(y + 7) * 2 / gHeight;
-    enabledRadioButton(fx, fy);
-  }
-};
-
-struct TextNode: Renderable {
+struct TextNode {
   String value;
   TextNode(String x): value(move(x)) {}
-  void draw(i32 x, i32 y, u32 dx, u32 dy) override {
+  void draw(i32 x, i32 y, u32 dx, u32 dy) {
     (void) dx;
     (void) dy;
 
@@ -593,7 +576,13 @@ auto text(Str x) {
 
   u32 minWidth = 6 * maxWordLen - 1;
   u32 maxWidth = 6 * len - 1;
-  return cat(LayoutEntry {.min={minWidth, 7}, .pref={maxWidth, 7}, .user=new TextNode(x), .activeDrop=[](void* p) { delete (TextNode*) p; }});
+  return cat(
+      LayoutEntry {
+          .min = {minWidth, 7},
+          .pref = {maxWidth, 7},
+          .user = new TextNode(x),
+          .drop = [](void* p) { delete (TextNode*) p; },
+          .draw = [](void* p, auto... x) { ((TextNode*) p)->draw(x...); }});
 
   // add child to container... need to bubble up: layout child, layout parent,
   // layout parent, layout parent, etc. for each parent that changed, bubble
@@ -618,18 +607,29 @@ auto text(Str x) {
   // point or parent layout node.
 }
 
-struct Mount {
-  LayoutEntry lay;
-  virtual ~Mount() = default;
+struct RadioNode {
+  virtual void click() = 0;
+  virtual bool checked() = 0;
+  virtual ~RadioNode() = default;
+
+  void draw(i32 x, i32 y, u32 dx, u32 dy) {
+    check(dx == 14);
+    check(dy == 14);
+    f32 fx = -1 + f32(x + 7) * 2 / gWidth;
+    f32 fy = 1 - f32(y + 7) * 2 / gHeight;
+    auto on = checked();
+    on ? enabledRadioButton(fx, fy) : disabledRadioButton(fx, fy);
+  }
 };
 
-struct ContainerMount: Mount {
-  List<Mount> kids;
-  ~ContainerMount() override = default;
-};
-
-auto radioButton() {
-  return LayoutEntry {.min={14, 14}, .pref={14, 14}, .user=new RadioNode, .activeDrop=[](void* p) { delete (RadioNode*) p; }};
+auto radioButton(RadioNode* hdl) {
+  return LayoutEntry {
+      .min = {14, 14},
+      .pref = {14, 14},
+      .user = hdl,
+      .drop = [](void* p) { delete (RadioNode*) p; },
+      .draw = [](void* p, auto... x) { ((RadioNode*) p)->draw(x...); },
+      .click = [](void* p) { ((RadioNode*) p)->click(); }};
 }
 
 template <class T>
@@ -896,18 +896,6 @@ struct Dimension {
   }
 };
 
-constexpr auto radio_button = [](State<bool>& enabled) {
-  return [&enabled]() {
-    return enabled([&](bool val) {
-      u32 cx = 30;
-      u32 cy = 30;
-      f32 x = -1 + f32(cx) * 2 / gWidth;
-      f32 y = 1 - f32(cy) * 2 / gHeight;
-      val ? enabledRadioButton(x, y) : disabledRadioButton(x, y);
-    });
-  };
-};
-
 constexpr Vec3 red {1, 0, 0};
 constexpr Vec3 green {0, 1, 0};
 constexpr Vec3 blue {0, 0, 1};
@@ -934,6 +922,7 @@ struct App {
   bool didLayout {};
 
   List<f32> positions;
+  List<bool> selected;
 
   struct ActiveRegion {
     void* aux;
@@ -957,7 +946,8 @@ struct App {
     }
   }
 
-  void evaluateLayout(List<LayoutEntry>& dst, List<u32>& kids, Array<LayoutEntry> content) {
+  void evaluateLayout(
+      List<LayoutEntry>& dst, List<u32>& kids, Array<LayoutEntry> content) {
     for (auto& entry: content) {
       if (entry.active) {
         u32 id;
@@ -972,7 +962,7 @@ struct App {
         auto& ans = regions[id];
         ans.aux = entry.user;
         ans.gen = entry.activeGenerate;
-        ans.drop = entry.activeDrop;
+        ans.drop = entry.drop;
         ans.begin = len(dst);
         List<u32> newKids;
         evaluateLayout(dst, newKids, ans.gen(ans.aux));
@@ -998,8 +988,8 @@ struct App {
     for (u32 i = region.begin; i < region.end; ++i) {
       auto& entry = lay[i];
       check(!entry.active);
-      if (entry.user)
-        entry.activeDrop(entry.user);
+      if (entry.drop)
+        entry.drop(entry.user);
     }
 
     extend(newLayout, slice(lay.span(), 0, region.begin));
@@ -1023,41 +1013,54 @@ struct App {
         spacer);  // right spacer
 
     LayoutEntry menuComponent {
-      .user = (void*) this,
-      .active = 1,
-      .activeGenerate = [](void* ptr) {
-        auto& self = *(App const*) ptr;
-        List<LayoutEntry> menuItems;
-        for (auto p: self.positions)
-          extend(menuItems, Ref(row(0, 0, 1, 0, text(strcat("Item ", p)), minSpace(10), radioButton())));
-        return colGapN(0, 0, 0, 0, 5, 5, len(self.positions), menuItems);
-      },
-      .activeDrop = [](void*) {}};
+        .user = (void*) this,
+        .active = 1,
+        .activeGenerate =
+            [](void* ptr) {
+              auto& self = *(App*) ptr;
+              List<LayoutEntry> menuItems;
+              for (auto i: range(len(self.positions))) {
+                auto& p = self.positions[i];
+
+                struct MyRadioNode: RadioNode {
+                  App& app;
+                  u32 i;
+                  MyRadioNode(App& app_, u32 i_): app(app_), i(i_) {}
+                  bool checked() override { return app.selected[i]; }
+                  void click() override {
+                    auto& on = app.selected[i];
+                    on = !on;
+                    redraw();
+                  }
+                };
+
+                extend(
+                    menuItems,
+                    Ref(
+                        row(0, 0, 1, 0, text(strcat("Item ", p)), minSpace(10),
+                            radioButton(new MyRadioNode(self, i)))));
+              }
+              return colGapN(0, 0, 0, 0, 5, 5, len(self.positions), menuItems);
+            },
+        .drop = [](void*) {}};
 
     auto lipsum = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
     auto lipsum2 = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
 
-    return row(0, 0, 1, 1,
-      sidebar,
-      col(0, 0, 1, 1,
-        title_bar,
-        // tab bar
-        row(0, 0, 1, 0,
-          row(200, 40, 1, 0),  // left tab
-          row(200, 40, 1, 0)  // right tab
-        ),
-        row(0, 0, 1, 1, menuComponent, lipsum, lipsum2)  // main content
-      ));
+    return row(
+        0, 0, 1, 1, sidebar,
+        col(0, 0, 1, 1, title_bar,
+            // tab bar
+            row(0, 0, 1, 0, row(200, 40, 1, 0),  // left tab
+                row(200, 40, 1, 0)  // right tab
+                ),
+            row(0, 0, 1, 1, menuComponent, lipsum, lipsum2)  // main content
+            ));
   }
 
   App() {
     positions.push(3.14f);
-    // subscriber going out of scope should always unsubscribe from its source
-    // who keeps the element alive?
-    // window deallocates the window controller
-    // parent deallocates its children
-    // parent owns its children
-    // if you create a hierarchy and add a bunch of children to it, you can just keep non-owning references to them
+    selected.push(0);
 
     List<LayoutEntry> news;
     List<u32> unusedKids;
@@ -1094,22 +1097,24 @@ struct App {
 
   bool mouseDown(f32 gx, f32 gy) {
     println("mouseDown ", gx, ' ', gy);
-    positions.push(gx);
 
-    redraw();
-
-    /*
     u32 px = u32((gx + 1) / 2 * f32(width));
     u32 py = u32((1 - gy) / 2 * f32(height));
     for (u32 j: range(len(lay))) {
       u32 i = len(lay) - j - 1;
+      auto& node = lay[i];
+      if (!node.click)
+        continue;
       if (px >= x.pos[i] && px < x.pos[i] + x.size[i] &&
           py >= y.pos[i] && py < y.pos[i] + y.size[i]) {
         println("hit");
-        break;
+        node.click(node.user);
+        return 1;
       }
     }
-    */
+
+    positions.push(gx);
+    redraw();
 
     // TODO: Allow re-laying-out only parts of the tree?
     regenRegion(0);
@@ -1134,9 +1139,9 @@ struct App {
     }
 
     for (u32 i: range(len(lay))) {
-      if (lay[i].user) {
-        Renderable* r = (Renderable*) lay[i].user;
-        r->draw(x.pos[i], y.pos[i], x.size[i], y.size[i]);
+      auto& node = lay[i];
+      if (node.draw) {
+        node.draw(node.user, x.pos[i], y.pos[i], x.size[i], y.size[i]);
       } else {
         drawRect(x.pos[i], y.pos[i], x.size[i], y.size[i], grayu8(i * 137));
       }
