@@ -3,8 +3,11 @@
 <body>
 <script>
 const canvas = document.createElement('canvas');
-canvas.width = 600;
-canvas.height = 600;
+Object.assign(canvas.style, {
+  width: '100%',
+  height: '100%',
+});
+canvas.style.imageRendering = 'pixelated';
 document.body.appendChild(canvas);
 Object.assign(document.body.style, {
   overflow: 'hidden',
@@ -19,12 +22,11 @@ Object.assign(document.body.style, {
   alignItems: 'center',
 });
 
-const gl = canvas.getContext('webgl2');
-gl.enable(gl.DEPTH_TEST);
+const gl = canvas.getContext('webgl2', {antialias: false});
 
 const create_shader = (gl, type, source) => {
   const shader = gl.createShader(type);
-  gl.shaderSource(shader, source);
+  gl.shaderSource(shader, `#version 300 es\n${source}`);
   gl.compileShader(shader);
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
     const info = gl.getShaderInfoLog(shader);
@@ -38,12 +40,40 @@ const ctx = {
   draw: null,
 };
 
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
 let memory;
 const shaders = [];
+const vaos = [];
 const programs = [];
 const buffers = [];
 const decoder = new TextDecoder();
 const env = {
+  abort() { throw 0; },
+  enableBlend() { gl.enable(gl.BLEND); },
+  disableBlend() { gl.disable(gl.BLEND); },
+  enableDepthTest() { gl.enable(gl.DEPTH_TEST); },
+  disableDepthTest() { gl.disable(gl.DEPTH_TEST); },
+  demo() {
+    gl.vertexAttrib2f(0, 0, 0);
+    gl.vertexAttrib1f(1, 10);//0.1, 0.1);
+    gl.enable(gl.BLEND);
+  },
+  vertexAttrib1f(attrib, x) { gl.vertexAttrib1f(attrib, x); },
+  vertexAttrib2f(attrib, x, y) { gl.vertexAttrib2f(attrib, x, y); },
+  vertexAttrib3f(attrib, x, y, z) { gl.vertexAttrib3f(attrib, x, y, z); },
+  vertexAttrib4f(attrib, x, y, z, w) { gl.vertexAttrib4f(attrib, x, y, z, w); },
+  makeVertexArray() {
+    const id = vaos.length + 1;
+    vaos.push(gl.createVertexArray());
+    return id;
+  },
+  bindVertexArray(vertexArray) {
+    gl.bindVertexArray(vaos[vertexArray - 1]);
+  },
+  dropVertexArray(vertexArray) {
+    gl.deleteVertexArray(vaos[vertexArray - 1]);
+  },
   make_vertex_shader(source, len) {
     const id = shaders.length;
     const data = decoder.decode(new Uint8Array(memory, source, len));
@@ -55,6 +85,21 @@ const env = {
     const data = decoder.decode(new Uint8Array(memory, source, len));
     shaders.push(create_shader(gl, gl.FRAGMENT_SHADER, data));
     return id;
+  },
+  set_viewport(x, y, dx, dy) {
+    gl.viewport(x, y, dx, dy);
+  },
+  vertexAttributeArrayU8(attrib, buffer, components, stride, offset, instanceDivisor) {
+    gl.enableVertexAttribArray(attrib);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers[buffer]);
+    gl.vertexAttribIPointer(attrib, components, gl.UNSIGNED_BYTE, stride, offset);
+    gl.vertexAttribDivisor(attrib, instanceDivisor);
+  },
+  vertexAttributeArrayI16(attrib, buffer, components, stride, offset, instanceDivisor) {
+    gl.enableVertexAttribArray(attrib);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers[buffer]);
+    gl.vertexAttribIPointer(attrib, components, gl.SHORT, stride, offset);
+    gl.vertexAttribDivisor(attrib, instanceDivisor);
   },
   make_program(ptr, len) {
     const shader_ids = new Uint32Array(memory, ptr, len);
@@ -82,6 +127,9 @@ const env = {
   drawPoints(base, count) {
     gl.drawArrays(gl.POINTS, base, count);
   },
+  drawTriangleStrip(base, count, instanceCount) {
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, base, count, instanceCount);
+  },
   redraw() {
     if (!ctx.needsDraw) {
       ctx.needsDraw = true;
@@ -95,6 +143,9 @@ const env = {
     gl.bufferData(gl.ARRAY_BUFFER, size, gl.DYNAMIC_DRAW);
     buffers.push(buffer);
     return id;
+  },
+  dropBuffer(buffer) {
+    gl.deleteBuffer(buffers[buffer]);
   },
   bindUniformBuffer(index, buffer) {
     gl.bindBufferBase(gl.UNIFORM_BUFFER, index, buffers[buffer]);
@@ -111,24 +162,68 @@ const env = {
   bindUniformBlock(program, block, binding) {
     gl.uniformBlockBinding(programs[program], block, binding);
   },
+  make_texture(src, size) {
+    const data = new Uint8Array(memory, src, size);
+    data[0] = 255;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,                // mip level
+        gl.R8UI,          // internal format
+        560,                // width
+        1,                // height
+        0,                // border
+        gl.RED_INTEGER,   // source format
+        gl.UNSIGNED_BYTE, // source type
+        data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  }
 };
 
 WebAssembly.instantiateStreaming(fetch('main.wasm'), { env }).then(mod => {
   memory = mod.instance.exports.memory.buffer;
   const exports = mod.instance.exports;
-  exports.start();
+  exports.wasm_start();
+
   const draw = () => {
-    gl.clear(gl.COLOR_BUFFER_BIT);
+//    gl.clear(gl.COLOR_BUFFER_BIT);
     ctx.needsDraw = false;
     exports.draw();
   };
   ctx.draw = draw;
-  draw();
+  //draw();
 
   canvas.addEventListener('wheel', e => {
     exports.scroll(0, 0, e.deltaX, e.deltaY);
     e.preventDefault();
   }, false);
+
+  document.addEventListener('keydown', e => {
+    if (exports.wasm_key(e.keyCode))
+      e.preventDefault();
+  }, false);
+
+  document.addEventListener('mousedown', e => {
+    const r = canvas.getBoundingClientRect();
+    const gx = ((e.clientX - r.x) / r.width) * 2 - 1;
+    const gy = 1 - ((e.clientY - r.y) / r.height) * 2;
+    if (exports.mouseDown(gx, gy)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }
+  });
+
+  const resize = () => {
+    const {innerWidth: w, innerHeight: h, devicePixelRatio: k} = window;
+    canvas.width = w * k;
+    canvas.height = h * k;
+    exports.resize(w, h, k);
+  };
+  window.addEventListener('resize', resize);
+  resize();
 });
 </script>
 </html>
