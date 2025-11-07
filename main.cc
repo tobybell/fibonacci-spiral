@@ -1114,8 +1114,9 @@ struct App {
                             makeNode(new MyRadioNode(self, i)))));
               }
               menuItems.push(makeNode(new Switch()));
+              menuItems.push(makeNode(new Switch()));
               return colGapN(
-                  0, 0, 0, 0, 5, 5, len(self.positions) + 1, menuItems);
+                  0, 0, 0, 0, 5, 5, len(self.positions) + 2, menuItems);
             },
         .drop = [](void*) {}};
 

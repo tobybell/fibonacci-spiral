@@ -2,7 +2,7 @@ MODS=main.cc print.cc font-data.cc print-float.c
 OBJECTS=$(MODS:%=build/%.o) build/keymap-mac.cc.o
 WOBJECTS=$(MODS:%=build/%.w.o) build/malloc.cc.w.o build/keymap-web.cc.w.o
 
-all: main.wasm build/main
+all: build/main.wasm build/main build/index2.html
 
 build/main: build/main-mac.m.o build/glad.c.o $(OBJECTS)
 	clang++ -o $@ -O2 -MD $^ -framework OpenGL -framework Cocoa
@@ -10,7 +10,7 @@ build/main: build/main-mac.m.o build/glad.c.o $(OBJECTS)
 build/%.m.o: %.m
 	clang -o $@ -O2 -MD -Wno-deprecated-declarations -Wall -Wextra -Wconversion -c $<
 
-main.wasm: $(WOBJECTS)
+build/main.wasm: $(WOBJECTS)
 	wasm-ld -o $@ --no-entry --export-all --import-undefined $^
 
 build/%.w.o: build/%.ll
@@ -27,6 +27,9 @@ build/%.cc.o: %.cc
 
 build/%.c.o: %.c
 	clang -o $@ -O2 -MD -std=c11 -c $<
+
+build/index2.html: index2.html
+	cp $< $@
 
 -include $(OBJECTS:.o=.d)
 -include $(WOBJECTS:.o=.d)
