@@ -75,6 +75,7 @@ u32 textProgram;
 u32 textPositionBuffer;
 u32 multiLineTextProgram;
 u32 circleProgram;
+u32 roundRectProgram;
 u32 rectProgram;
 u32 defaultVao;
 f32 gWidth, gHeight;  // resolution
@@ -406,6 +407,12 @@ struct Work {
 
 enum Direction: u8 { X, Y };
 
+struct Sizing {
+  u32 min[2];
+  u32 pref[2];
+  bool grow[2];
+};
+
 struct LayoutEntry {
   u32 min[2];
   u32 pref[2];
@@ -620,16 +627,56 @@ struct RadioNode {
     auto on = checked();
     on ? enabledRadioButton(fx, fy) : disabledRadioButton(fx, fy);
   }
+
+  Sizing sizing() const { return {.min = {14, 14}, .pref = {14, 14}}; }
 };
 
-auto radioButton(RadioNode* hdl) {
+struct Switch {
+
+  void draw(i32 x, i32 y, u32 dx, u32 dy) {
+    useProgram(roundRectProgram);
+    enableBlend();
+    bindVertexArray(defaultVao);
+    f32 gx = 2 / gWidth;
+    f32 gy = 2 / gHeight;
+    vertexAttrib2f(0, f32(x) * gx - 1, 1 - f32(y) * gy);
+    vertexAttrib2f(1, 26, 15);
+    drawTriangleStrip(0, 4, 1);
+    disableBlend();
+
+    circle(
+        (f32(x) + 7.5f) * gx - 1, 1 - (f32(y) + 7.5) * gy, 6.5f,
+        {.8f, .8f, .8f}, {.77f, .77f, .77f});
+  }
+
+  Sizing sizing() const { return {.min = {26, 15}, .pref = {26, 15}}; }
+
+  void click() {}
+};
+
+template <class T>
+auto makeNode(T& x) {
+  auto sz = x.sizing();
   return LayoutEntry {
-      .min = {14, 14},
-      .pref = {14, 14},
-      .user = hdl,
-      .drop = [](void* p) { delete (RadioNode*) p; },
-      .draw = [](void* p, auto... x) { ((RadioNode*) p)->draw(x...); },
-      .click = [](void* p) { ((RadioNode*) p)->click(); }};
+      .min = {sz.min[0], sz.min[1]},
+      .pref = {sz.pref[0], sz.pref[1]},
+      .grow = {sz.grow[0], sz.grow[1]},
+      .user = &x,
+      .draw = [](void* p, auto... x) { ((T*) p)->draw(x...); },
+      .click = [](void* p) { ((T*) p)->click(); }};
+}
+
+template <class T>
+auto makeNode(T* x) {
+  auto sz = x->sizing();
+  return LayoutEntry {
+      .min = {sz.min[0], sz.min[1]},
+      .pref = {sz.pref[0], sz.pref[1]},
+      .grow = {sz.grow[0], sz.grow[1]},
+      .user = x,
+      .drop = [](void* p) { delete (T*) p; },
+      .draw = [](void* p, auto... x) { ((T*) p)->draw(x...); },
+      .click = [](void* p) { ((T*) p)->click(); }};
 }
 
 template <class T>
@@ -1038,9 +1085,11 @@ struct App {
                     menuItems,
                     Ref(
                         row(0, 0, 1, 0, text(strcat("Item ", p)), minSpace(10),
-                            radioButton(new MyRadioNode(self, i)))));
+                            makeNode(new MyRadioNode(self, i)))));
               }
-              return colGapN(0, 0, 0, 0, 5, 5, len(self.positions), menuItems);
+              menuItems.push(makeNode(new Switch()));
+              return colGapN(
+                  0, 0, 0, 0, 5, 5, len(self.positions) + 1, menuItems);
             },
         .drop = [](void*) {}};
 
@@ -1194,12 +1243,63 @@ void main() {
   highp float rad = length(vCoord);
   if (rad >= vRadius)
     discard;
-  highp float alpha = min(1.0, vRadius - rad);
+  highp float alpha = min(1.0, 2.0 * (vRadius - rad));
   lowp vec3 color = vTop * vGradient + vBottom * (1.0 - vGradient);
   oColor = vec4(color, alpha);
 }
 )gl");
   circleProgram = make_program((u32[]) {circle_vshader, circle_fshader});
+
+  u32 roundRectVertexShader = make_vertex_shader(R"gl(
+uniform Resolution {
+  highp vec2 uResolution;
+  highp vec2 uPixel;
+};
+layout (location = 0) in highp vec2 center;
+layout (location = 1) in highp vec2 size;
+out highp vec2 vCoord;
+void main() {
+  vec2 coord = vec2(gl_VertexID / 2, gl_VertexID % 2) * size;
+  vCoord = coord;
+  gl_Position = vec4(center + coord * vec2(1, -1) * uPixel, 0, 1);
+}
+)gl");
+  u32 roundRectFragmentShader = make_fragment_shader(R"gl(
+uniform Resolution {
+  highp vec2 uResolution;
+  highp vec2 uPixel;
+};
+in highp vec2 vCoord;
+out lowp vec4 oColor;
+void main() {
+  mediump vec2 o = abs(vCoord - vec2(13, 7.5)) - vec2(5.5, 0);
+  highp float l;
+  if (o.x > 0. && o.y > 0.) {
+    l = length(o);
+  } else if (o.x > 0.) {
+    l = o.x;
+  } else if (o.y > 0.) {
+    l = o.y;
+  } else {
+    l = 0.;
+  }
+
+  const lowp vec4 c0 = vec4(vec3(0.36), 0.0);
+  const lowp vec4 c1 = vec4(vec3(0.36), 1.0);
+  const lowp vec4 c2 = vec4(vec3(0.23), 1.0);
+
+  if (l > 7.75)
+    discard;
+  if (l > 7.25)
+    oColor = mix(c1, c0, (l - 7.25) * 2.0);
+  else if (l > 6.25)
+    oColor = mix(c2, c1, l - 6.25);
+  else
+    oColor = c2;
+}
+)gl");
+  roundRectProgram =
+      make_program((u32[]) {roundRectVertexShader, roundRectFragmentShader});
 
   u32 rect_vshader = make_vertex_shader(R"gl(
 layout (location = 0) in mediump vec4 aRect;
@@ -1313,6 +1413,10 @@ void main() {
   bindUniformBlock(multiLineTextProgram, mltr, 2);
   u32 cr = getUniformBlock(circleProgram, "Resolution");
   bindUniformBlock(circleProgram, cr, 2);
+  {
+    u32 u = getUniformBlock(roundRectProgram, "Resolution");
+    bindUniformBlock(roundRectProgram, u, 2);
+  }
 
   textPositionBuffer = makeBuffer(8);
   bindUniformBuffer(3, textPositionBuffer);
