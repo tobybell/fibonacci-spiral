@@ -59,6 +59,8 @@ void init_heap();
 
 namespace {
 
+f32 abs(f32 x) { return __builtin_fabsf(x); }
+
 template <class T, class F>
 void sort(Ref<T> elem, F&& cmp) {
   quicksort(elem.begin(), elem.end(), cmp);
@@ -231,6 +233,9 @@ union Vec3 {
   struct {
     f32 x, y, z;
   };
+  Vec3 operator*(f32 v) const { return {x * v, y * v, z * v}; }
+  Vec3 operator-(Vec3 const& v) const { return {x - v.x, y - v.y, z - v.z}; }
+  Vec3 operator+(Vec3 const& v) const { return {x + v.x, y + v.y, z + v.z}; }
 };
 
 Vec3 rgbu8(u8 r, u8 g, u8 b) {
@@ -632,6 +637,8 @@ struct RadioNode {
 };
 
 struct Switch {
+  bool on {};
+  f32 t {};
 
   void draw(i32 x, i32 y, u32 dx, u32 dy) {
     useProgram(roundRectProgram);
@@ -641,17 +648,36 @@ struct Switch {
     f32 gy = 2 / gHeight;
     vertexAttrib2f(0, f32(x) * gx - 1, 1 - f32(y) * gy);
     vertexAttrib2f(1, 26, 15);
+
+    f32 tdes = f32(on);
+    t += (tdes - t) * 0.25f;
+
+    auto offColor = Vec3 {.36f, .36f, .36f};
+    auto onColor = Vec3 {.18f, .37f, .8f};
+    auto color = offColor + (onColor - offColor) * t;
+
+    vertexAttrib3f(2, color.x, color.y, color.z);
     drawTriangleStrip(0, 4, 1);
     disableBlend();
 
+    f32 sx = 7.5 + 11 * t;
     circle(
-        (f32(x) + 7.5f) * gx - 1, 1 - (f32(y) + 7.5) * gy, 6.5f,
-        {.8f, .8f, .8f}, {.77f, .77f, .77f});
+        (f32(x) + sx) * gx - 1, 1 - (f32(y) + 7.5) * gy, 6.5f, {.8f, .8f, .8f},
+        {.77f, .77f, .77f});
+
+    if (abs(t - tdes) < 1e-2) {
+      t = tdes;
+    } else {
+      redraw();
+    }
   }
 
   Sizing sizing() const { return {.min = {26, 15}, .pref = {26, 15}}; }
 
-  void click() {}
+  void click() {
+    on = !on;
+    redraw();
+  }
 };
 
 template <class T>
@@ -1257,8 +1283,11 @@ uniform Resolution {
 };
 layout (location = 0) in highp vec2 center;
 layout (location = 1) in highp vec2 size;
+layout (location = 2) in lowp vec3 color;
 out highp vec2 vCoord;
+flat out lowp vec3 fColor;
 void main() {
+  fColor = color;
   vec2 coord = vec2(gl_VertexID / 2, gl_VertexID % 2) * size;
   vCoord = coord;
   gl_Position = vec4(center + coord * vec2(1, -1) * uPixel, 0, 1);
@@ -1269,6 +1298,7 @@ uniform Resolution {
   highp vec2 uResolution;
   highp vec2 uPixel;
 };
+flat in lowp vec3 fColor;
 in highp vec2 vCoord;
 out lowp vec4 oColor;
 void main() {
@@ -1284,9 +1314,9 @@ void main() {
     l = 0.;
   }
 
-  const lowp vec4 c0 = vec4(vec3(0.36), 0.0);
-  const lowp vec4 c1 = vec4(vec3(0.36), 1.0);
-  const lowp vec4 c2 = vec4(vec3(0.23), 1.0);
+  lowp vec4 c0 = vec4(vec3(0.36), 0.0);
+  lowp vec4 c1 = vec4(1.0 - 0.8 * (1.0 - fColor), 1.0);
+  lowp vec4 c2 = vec4(fColor, 1.0);
 
   if (l > 7.75)
     discard;
