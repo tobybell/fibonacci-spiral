@@ -636,40 +636,110 @@ struct RadioNode {
   Sizing sizing() const { return {.min = {14, 14}, .pref = {14, 14}}; }
 };
 
+struct Tint {
+  f32 radius = 1;
+  f32 slope;
+};
+
+constexpr Tint noTint {1, 0};
+
+Tint tint(f32 radius, f32 amount) { return {radius, amount / radius}; }
+
+void drawRoundRect(
+    f32 x, f32 y, f32 dx, f32 dy, f32 radius, Vec3 color, Tint glow,
+    Tint shadow, Tint topTint, Tint bottomTint) {
+  useProgram(roundRectProgram);
+  enableBlend();
+  bindVertexArray(defaultVao);
+  vertexAttrib2f(0, x, y);
+  vertexAttrib2f(1, dx, dy);
+  vertexAttrib3f(2, color.x, color.y, color.z);
+  vertexAttrib1f(3, radius);
+  vertexAttrib4f(4, glow.radius, glow.slope, shadow.radius, shadow.slope);
+  vertexAttrib4f(
+      5, topTint.radius, topTint.slope, bottomTint.radius, bottomTint.slope);
+  drawTriangleStrip(0, 4, 1);
+  disableBlend();
+}
+
+void drawSwitch(i32 x, i32 y, u32 dx, u32 dy, f32 on) {
+  f32 gx = 2 / gWidth;
+  f32 gy = 2 / gHeight;
+  auto offColor = Vec3 {.36f, .36f, .36f};
+  auto onColor = Vec3 {.18f, .37f, .8f};
+  auto color = offColor + (onColor - offColor) * on;
+  drawRoundRect(
+      f32(x) * gx - 1, 1 - f32(y) * gy, dx, dy, 7.5f, color, tint(1.25f, .2f),
+      noTint, noTint, noTint);
+
+  f32 sx = 7.5 + 11 * on;
+  circle(
+      (f32(x) + sx) * gx - 1, 1 - (f32(y) + 7.5) * gy, 6.5f, {.8f, .8f, .8f},
+      {.77f, .77f, .77f});
+}
+
+void drawSlider(i32 x, i32 y, u32 dx, u32 dy, f32 on) {
+  auto blue = rgbu8(58, 121, 222);
+  f32 gx = 2 / gWidth;
+  f32 gy = 2 / gHeight;
+  f32 sx = f32(dx - 20) * on;
+  drawRoundRect(
+      (f32(x) + sx) * gx - 1, 1 - f32(y + 8) * gy, dx - sx, 4, 2, grayu8(61),
+      noTint, noTint, noTint, noTint);
+  drawRoundRect(
+      f32(x) * gx - 1, 1 - f32(y + 8) * gy, sx + 12, 4, 2, blue, noTint, noTint,
+      noTint, noTint);
+  drawRoundRect(
+      (f32(x) + sx) * gx - 1, 1 - f32(y) * gy, 20, 20, 10, grayu8(180),
+      tint(2, .2f), tint(1, .2f), tint(.5f, .6f), tint(.5f, .3f));
+}
+
+struct Slider {
+  bool on {};
+  f32 t {};
+  f32 dt {};
+
+  void draw(i32 x, i32 y, u32 dx, u32 dy) {
+    if (on) {
+      t += .025f;
+      if (t >= 1) {
+        t = 1;
+      } else {
+        redraw();
+      }
+    } else {
+      t -= .025f;
+      if (t <= 0) {
+        t = 0;
+      } else {
+        redraw();
+      }
+    }
+    f32 f = t * t * (3 - 2 * t);
+    drawSlider(x, y, dx, dy, f);
+  }
+
+  Sizing sizing() const { return {.min = {187, 20}, .pref = {187, 20}}; }
+
+  void click() {
+    on = !on;
+    redraw();
+  }
+};
+
 struct Switch {
   bool on {};
   f32 t {};
 
   void draw(i32 x, i32 y, u32 dx, u32 dy) {
-    useProgram(roundRectProgram);
-    enableBlend();
-    bindVertexArray(defaultVao);
-    f32 gx = 2 / gWidth;
-    f32 gy = 2 / gHeight;
-    vertexAttrib2f(0, f32(x) * gx - 1, 1 - f32(y) * gy);
-    vertexAttrib2f(1, 26, 15);
-
     f32 tdes = f32(on);
     t += (tdes - t) * 0.25f;
-
-    auto offColor = Vec3 {.36f, .36f, .36f};
-    auto onColor = Vec3 {.18f, .37f, .8f};
-    auto color = offColor + (onColor - offColor) * t;
-
-    vertexAttrib3f(2, color.x, color.y, color.z);
-    drawTriangleStrip(0, 4, 1);
-    disableBlend();
-
-    f32 sx = 7.5 + 11 * t;
-    circle(
-        (f32(x) + sx) * gx - 1, 1 - (f32(y) + 7.5) * gy, 6.5f, {.8f, .8f, .8f},
-        {.77f, .77f, .77f});
-
     if (abs(t - tdes) < 1e-2) {
       t = tdes;
     } else {
       redraw();
     }
+    drawSwitch(x, y, dx, dy, t);
   }
 
   Sizing sizing() const { return {.min = {26, 15}, .pref = {26, 15}}; }
@@ -1114,7 +1184,7 @@ struct App {
                             makeNode(new MyRadioNode(self, i)))));
               }
               menuItems.push(makeNode(new Switch()));
-              menuItems.push(makeNode(new Switch()));
+              menuItems.push(makeNode(new Slider()));
               return colGapN(
                   0, 0, 0, 0, 5, 5, len(self.positions) + 2, menuItems);
             },
@@ -1285,12 +1355,23 @@ uniform Resolution {
 layout (location = 0) in highp vec2 center;
 layout (location = 1) in highp vec2 size;
 layout (location = 2) in lowp vec3 color;
+layout (location = 3) in highp float aRadius;
+layout (location = 4) in lowp vec4 aGlowShadow;
+layout (location = 5) in lowp vec4 aTopBottom;
 out highp vec2 vCoord;
 flat out lowp vec3 fColor;
+flat out highp vec2 fCorner;
+flat out highp float fRadius;
+flat out lowp vec4 fGlowShadow;
+flat out lowp vec4 fTopBottom;
 void main() {
   fColor = color;
-  vec2 coord = vec2(gl_VertexID / 2, gl_VertexID % 2) * size;
-  vCoord = coord;
+  fCorner = (size / 2.) - aRadius;
+  fRadius = aRadius;
+  fGlowShadow = aGlowShadow;
+  fTopBottom = aTopBottom;
+  vec2 coord = vec2(gl_VertexID / 2, gl_VertexID % 2) * (size + 2. * aGlowShadow.z) - aGlowShadow.z;
+  vCoord = coord - (size / 2.);
   gl_Position = vec4(center + coord * vec2(1, -1) * uPixel, 0, 1);
 }
 )gl");
@@ -1300,33 +1381,52 @@ uniform Resolution {
   highp vec2 uPixel;
 };
 flat in lowp vec3 fColor;
+flat in highp vec2 fCorner;
+flat in highp float fRadius;
+flat in lowp vec4 fGlowShadow;
+flat in lowp vec4 fTopBottom;
 in highp vec2 vCoord;
 out lowp vec4 oColor;
 void main() {
-  mediump vec2 o = abs(vCoord - vec2(13, 7.5)) - vec2(5.5, 0);
+  mediump vec2 o = abs(vCoord) - fCorner;
+
   highp float l;
-  if (o.x > 0. && o.y > 0.) {
-    l = length(o);
-  } else if (o.x > 0.) {
-    l = o.x;
-  } else if (o.y > 0.) {
-    l = o.y;
+  highp float t;
+  lowp float tintOfs = vCoord.y < 0. ? fTopBottom.x : fTopBottom.z;
+  lowp float tintSlope = vCoord.y < 0. ? fTopBottom.y : -fTopBottom.w;
+  mediump float tintY = fRadius - tintOfs;
+  if (o.x > 0.) {
+    l = o.y < 0. ? o.x : length(o);
+    mediump float tintRadius = (tintY + fRadius * fRadius / tintY) / 2.;
+    t = length(vec2(o.x, o.y + tintRadius - tintY)) - tintRadius;
   } else {
-    l = 0.;
+    t = o.y - tintY;
+    l = max(0., o.y);
+  }
+  l -= fRadius;
+
+  if (l > 2.)
+    discard;
+
+  lowp float shadow = (fGlowShadow.z - l) * fGlowShadow.w;
+  if (l > .25) {  // TODO: pixel vs point
+    oColor = vec4(vec3(0.0), shadow);
+    return;
   }
 
-  lowp vec4 c0 = vec4(vec3(0.36), 0.0);
-  lowp vec4 c1 = vec4(1.0 - 0.8 * (1.0 - fColor), 1.0);
-  lowp vec4 c2 = vec4(fColor, 1.0);
+  lowp vec3 color = fColor;
+  lowp float tint = 0.;
+  tint += max(l + fGlowShadow.x, 0.) * fGlowShadow.y;
+  tint += max(t, 0.) * tintSlope;
+  if (tint > 0.) {
+    color += (1. - color) * tint;
+  } else {
+    color *= 1. + tint;
+  }
 
-  if (l > 7.75)
-    discard;
-  if (l > 7.25)
-    oColor = mix(c1, c0, (l - 7.25) * 2.0);
-  else if (l > 6.25)
-    oColor = mix(c2, c1, l - 6.25);
-  else
-    oColor = c2;
+  lowp float alpha = clamp((.25 - l) * 2., 0., 1.);  // TODO: pixel vs point
+  lowp float totalAlpha = alpha + (1. - alpha) * shadow;
+  oColor = vec4(alpha / totalAlpha * color, totalAlpha);
 }
 )gl");
   roundRectProgram =
