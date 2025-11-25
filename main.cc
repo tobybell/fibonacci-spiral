@@ -1149,6 +1149,9 @@ struct App {
     lay = newLayout.take();
   }
 
+  Switch switch_;
+  Slider slider;
+
   Array<LayoutEntry> makeLayout() const {
     println("makeLayout");
 
@@ -1186,8 +1189,8 @@ struct App {
                         row(0, 0, 1, 0, text(strcat("Item ", p)), minSpace(10),
                             makeNode(new MyRadioNode(self, i)))));
               }
-              menuItems.push(makeNode(new Switch()));
-              menuItems.push(makeNode(new Slider()));
+              menuItems.push(makeNode(self.switch_));
+              menuItems.push(makeNode(self.slider));
               return colGapN(
                   0, 0, 0, 0, 5, 5, len(self.positions) + 2, menuItems);
             },
