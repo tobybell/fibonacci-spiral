@@ -123,17 +123,15 @@ template <bool Cond>
 using enable_if = typename EnableIf<Cond>::type;
 
 template <class T>
-struct Decay { using type = T; };
-
+struct Decay: Type<T> {};
 template <class T>
-struct Decay<T const&> { using type = T; };
-
+struct Decay<T const>: Type<T> {};
 template <class T>
-struct Decay<T&&> { using type = T; };
-
+struct Decay<T const&>: Type<T> {};
 template <class T>
-struct Decay<T&> { using type = T; };
-
+struct Decay<T&&>: Type<T> {};
+template <class T>
+struct Decay<T&>: Type<T> {};
 template <class T>
 using decay = typename Decay<T>::type;
 
@@ -329,16 +327,15 @@ struct AnyTypes<Any<T...>> {
 template <class T, class S>
 constexpr u32 any_index = type_index<typename AnyTypes<T>::type, S>;
 
-
 template <class T>
 struct Ref {
   T* base;
   u32 size;
   constexpr Ref() = default;
   constexpr Ref(T* b, u32 s): base(b), size(s) {}
-  template <u32 N>
+  template <u32 N, enable_if<N && !is_same<decay<T>, char>> = 0>
   constexpr Ref(T (&x)[N]): base(x), size(N) {}
-  template <u32 N>
+  template <u32 N, enable_if<N && !is_same<decay<T>, char>> = 0>
   constexpr Ref(T (&&x)[N]): base(x), size(N) {}
   friend u32 len(Ref const& x) { return x.size; }
   T* begin() const { return base; }
@@ -352,6 +349,16 @@ template <class T>
 using Span = Ref<T const>;
 
 using Str = Span<char>;
+
+struct StrLit {
+  Str s;
+  template <u32 N>
+  StrLit(char const (&x)[N]): s(x, N - 1) {
+    check(!x[N - 1]);
+  }
+  StrLit(Str s_): s(s_) {}
+  operator Str() const { return s; }
+};
 
 constexpr Str operator""_s(char const* s, uptr size) {
   return {s, u32(size)};

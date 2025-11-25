@@ -70,6 +70,9 @@ u32 make_vertex_shader(Str s) { return ::make_vertex_shader(s.base, s.size); }
 u32 make_fragment_shader(Str s) { return ::make_fragment_shader(s.base, s.size); }
 u32 make_program(Ref<u32 const> shaders) { return ::make_program(shaders.base, shaders.size); }
 u32 getUniformBlock(u32 program, Str s) { return ::getUniformBlock(program, s.base, s.size); }
+u32 getUniformBlock(u32 program, StrLit s) {
+  return getUniformBlock(program, Str(s));
+}
 
 u32 program;
 u32 pointProgram;
@@ -1190,8 +1193,10 @@ struct App {
             },
         .drop = [](void*) {}};
 
-    auto lipsum = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
-    auto lipsum2 = text("Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about.");
+    auto lipsum = text(
+        "Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about."_s);
+    auto lipsum2 = text(
+        "Toby: I think either it's an unfortunate \"be careful\" issue that we just don't resolve, or else all names require some sort of let/def statement the first time they're used. The issue I have with that is that there are times when the intended behavior is definitely to use a global name, which is why I feel like it might just be a thing people need to get used to being careful about."_s);
 
     return row(
         0, 0, 1, 1, sidebar,
@@ -1328,7 +1333,7 @@ void main() {
   vBottom = aBottom;
   gl_Position = vec4(center + vCoord * uPixel, 0, 1);
 }
-)gl");
+)gl"_s);
   u32 circle_fshader = make_fragment_shader(R"gl(
 in highp vec2 vCoord;
 in highp float vGradient;
@@ -1344,7 +1349,7 @@ void main() {
   lowp vec3 color = vTop * vGradient + vBottom * (1.0 - vGradient);
   oColor = vec4(color, alpha);
 }
-)gl");
+)gl"_s);
   circleProgram = make_program((u32[]) {circle_vshader, circle_fshader});
 
   u32 roundRectVertexShader = make_vertex_shader(R"gl(
@@ -1374,7 +1379,7 @@ void main() {
   vCoord = coord - (size / 2.);
   gl_Position = vec4(center + coord * vec2(1, -1) * uPixel, 0, 1);
 }
-)gl");
+)gl"_s);
   u32 roundRectFragmentShader = make_fragment_shader(R"gl(
 uniform Resolution {
   highp vec2 uResolution;
@@ -1428,7 +1433,7 @@ void main() {
   lowp float totalAlpha = alpha + (1. - alpha) * shadow;
   oColor = vec4(alpha / totalAlpha * color, totalAlpha);
 }
-)gl");
+)gl"_s);
   roundRectProgram =
       make_program((u32[]) {roundRectVertexShader, roundRectFragmentShader});
 
@@ -1441,14 +1446,14 @@ void main() {
   vColor = aColor;
   gl_Position = vec4(aRect.xy + coord * aRect.zw, 0, 1);
 }
-)gl");
+)gl"_s);
   u32 rect_fshader = make_fragment_shader(R"gl(
 flat in lowp vec3 vColor;
 out lowp vec4 oColor;
 void main() {
   oColor = vec4(vColor, 1);
 }
-)gl");
+)gl"_s);
   rectProgram = make_program((u32[]) {rect_vshader, rect_fshader});
   defaultVao = makeVertexArray();
 
@@ -1507,13 +1512,13 @@ void main() {
   vec3 pos = u_model * u_pos;
   gl_Position = u_view * vec4(pos, 1);
 }
-)gl");
-u32 s3 = make_fragment_shader(R"gl(
+)gl"_s);
+  u32 s3 = make_fragment_shader(R"gl(
 out mediump vec4 frag_color;
 void main() {
   frag_color = vec4(1, 0, 1, 1);
 }
-)gl");
+)gl"_s);
   pointProgram = make_program((u32[]) {s2, s3});
 
   println("Made"_s);
